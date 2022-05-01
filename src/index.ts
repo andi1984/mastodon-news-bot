@@ -13,9 +13,8 @@ const bree = new Bree({
    */
   defaultExtension: process.env.TS_NODE ? "ts" : "js",
   jobs: [
-    { name: "feed-grabber", interval: "2h" },
-    { name: "feed-tooter", cron: "0 16 * * *" },
-    { name: "latest-hashtag-boost", interval: "2h" },
+    { name: "feed-grabber", interval: "3h" },
+    { name: "feed-tooter", interval: "1h" },
     { name: "alive", interval: "30m" },
   ],
 });

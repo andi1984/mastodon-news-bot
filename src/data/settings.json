@@ -1,15 +1,10 @@
 {
-  "username": "wandern",
-  "hashtags": ["wandern", "saarWandern", "natur", "nature"],
-  "db_table": "feeds",
+  "username": "news",
+  "hashtags": [],
+  "db_table": "news",
   "feeds": {
-    "wirschum": "https://wirschum.de/feed/",
-    "strauchswanderlust": "https://www.strauchs-wanderlust.info/feed/",
-    "lebedraussen": "https://lebedraussen.de/feed/",
-    "fotografischereisenundwanderungen": "https://fotografischereisenundwanderungen.com/feed/",
-    "arnomeyer": "https://arno-meyer.de/feed/",
-    "erlebniswandern": "https://erlebnis-wandern-saarland.de/feed/",
-    "wandernmithans": "http://wandernmithans.de/feed/",
-    "hoppraus": "https://hoppraus.de/feed/"
-  }
+    "blaulicht": "https://blaulichtreport-saarland.de/feed/",
+    "saarnews": "https://www.saarnews.com/feed/"
+  },
+  "feed_hashtags": ["news", "saarland"]
 }

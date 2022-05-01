@@ -39,7 +39,7 @@ const { parentPort } = require("worker_threads");
     const mastoClient = await getInstance();
 
     // TODO: "Intelligently" computing the hashtags?
-    const tootText = rssFeedItem2Toot(article, ["wandern", "saarWandern"]);
+    const tootText = rssFeedItem2Toot(article, settings.feed_hashtags);
 
     // Toot the article
     await mastoClient.statuses.create({ status: tootText });
