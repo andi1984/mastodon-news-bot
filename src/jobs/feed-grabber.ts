@@ -27,7 +27,7 @@ type DB_ITEM = {
     const newData = await asyncFilter(
       rssData.items.map((item: any) => {
         return {
-          hash: `${tableId}-${sha256(item.title)}`,
+          hash: `${tableId}-${sha256(item.title)}-${sha256(item.link)}}`,
           data: JSON.stringify(item),
         };
       }),
