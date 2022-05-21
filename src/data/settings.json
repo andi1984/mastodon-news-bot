@@ -8,7 +8,6 @@
     "saarland-presse": "https://www.saarland.de/DE/medien-informationen/informationen/rss-feed/_feeds/pressemitteilungen_feed.xml",
     "saarland-bekanntmachungen": "https://www.saarland.de/DE/medien-informationen/informationen/rss-feed/_feeds/amtliche-bekanntmachungen_feed.xml",
     "saarland-nachrichten": "https://www.saarland-nachrichten.de/feed/",
-    "salue": "https://www.salue.de/nachrichten/news.xml"
   },
   "feed_hashtags": ["news", "saarland"]
 }
