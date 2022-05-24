@@ -1,5 +1,5 @@
 {
-  "name": "wandern_bot",
+  "name": "mastodon_news_bot",
   "version": "1.0.0",
   "description": "",
   "main": "src/index.ts",

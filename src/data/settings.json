@@ -7,7 +7,8 @@
     "saarland-veranstaltungen": "https://www.saarland.de/DE/medien-informationen/informationen/rss-feed/_feeds/veranstaltungen_feed.xml",
     "saarland-presse": "https://www.saarland.de/DE/medien-informationen/informationen/rss-feed/_feeds/pressemitteilungen_feed.xml",
     "saarland-bekanntmachungen": "https://www.saarland.de/DE/medien-informationen/informationen/rss-feed/_feeds/amtliche-bekanntmachungen_feed.xml",
-    "saarland-nachrichten": "https://www.saarland-nachrichten.de/feed/",
+    "saarland-nachrichten": "https://www.saarland-nachrichten.de/feed/"
   },
-  "feed_hashtags": ["news", "saarland"]
+  "feed_hashtags": ["news", "saarland"],
+  "min_freshness_hours": 24
 }

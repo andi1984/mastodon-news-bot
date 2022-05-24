@@ -9,16 +9,31 @@ const { parentPort } = require("worker_threads");
 (async () => {
   // Connect to DB
   const db = createClient();
-
-  // Get an article that hasn't been tooted yet.
-  let { data: feeds, error } = await db
+  let query = db
     .from(settings.db_table)
     .select("id,data")
     .is("tooted", false)
     .order("created_at", { ascending: false })
     .limit(1);
 
+  // Optional filter for feed items within certain freshness interval (hours)
+  if (!!settings.min_freshness_hours) {
+    // https://github.com/supabase/supabase/discussions/3734#discussioncomment-1579562
+    const minFreshnessDate = new Date();
+    minFreshnessDate.setHours(
+      minFreshnessDate.getHours() - settings.min_freshness_hours
+    );
+    console.log(
+      `Applying freshness filter for items being from ${minFreshnessDate} or earlier.`
+    );
+    query = query.filter("created_at", "gt", minFreshnessDate.toISOString());
+  }
+
+  // Get an article that hasn't been tooted yet.
+  let { data: feeds, error } = await query;
+
   if (error) {
+    console.log(error.message);
     throw error;
   }
 
