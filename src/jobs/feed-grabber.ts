@@ -29,6 +29,7 @@ type DB_ITEM = {
         return {
           hash: `${tableId}-${sha256(item.title)}-${sha256(item.link)}}`,
           data: JSON.stringify(item),
+          pub_date: new Date(item.pubDate).toISOString(),
         };
       }),
       async (item: DB_ITEM) => {

@@ -16,7 +16,7 @@ const bree = new Bree({
     { name: "feed-grabber", interval: "1h" },
     { name: "feed-tooter", interval: "2h" },
     { name: "alive", interval: "30m" },
-    { name: "cleanup", interval: "12h" },
+    { name: "cleanup", interval: "62h" },
   ],
 });
 
