@@ -9,7 +9,8 @@ const supabase = createClient();
   const { data, error } = await supabase
     .from(settings.db_table)
     .delete()
-    .eq("tooted", true);
+    .eq("tooted", true)
+    .select();
 
   console.log(`Deleted ${data?.length} entries`);
 
@@ -31,7 +32,8 @@ const supabase = createClient();
         .from(settings.db_table)
         .delete()
         .filter("pub_date", "lte", minFreshnessDate.toISOString())
-        .eq("tooted", false);
+        .eq("tooted", false)
+        .select();
 
     console.log(`Cleaned up ${freshnessDataPubDate?.length} stale feed items.`);
 
@@ -40,7 +42,8 @@ const supabase = createClient();
       .from(settings.db_table)
       .delete()
       .filter("created_at", "lte", minFreshnessDate.toISOString())
-      .eq("tooted", false);
+      .eq("tooted", false)
+      .select();
 
     console.log(`Cleaned up ${freshnessData?.length} stale feed items.`);
   }

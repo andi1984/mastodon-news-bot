@@ -63,7 +63,8 @@ const { parentPort } = require("worker_threads");
     const { data: updatedData, error: errorOnUpdate } = await db
       .from(settings.db_table)
       .update({ tooted: true })
-      .match({ id });
+      .match({ id })
+      .select();
 
     if (errorOnUpdate) {
       throw errorOnUpdate;

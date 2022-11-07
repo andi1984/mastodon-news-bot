@@ -47,7 +47,8 @@ type DB_ITEM = {
       console.log(`Inserting ${newData.length} new items`);
       const { data, error } = await supabase
         .from(settings.db_table)
-        .insert(newData);
+        .insert(newData)
+        .select();
       console.log({ data, error });
 
       return true;
