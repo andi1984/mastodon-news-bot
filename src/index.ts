@@ -1,9 +1,13 @@
 require("dotenv").config();
+import settings from "./data/settings.json";
+
 const path = require("path");
 
 const Bree = require("bree");
 
-console.log("starting bree");
+console.log(
+  "starting bree, min freshness hours: " + settings.min_freshness_hours
+);
 const bree = new Bree({
   root: path.join(__dirname, "jobs"),
   /**
@@ -16,7 +20,8 @@ const bree = new Bree({
     { name: "feed-grabber", interval: "1h" },
     { name: "feed-tooter", interval: "2h" },
     { name: "alive", interval: "30m" },
-    { name: "cleanup", interval: "3h" },
+    // Make sure cleanup happens AFTER min_freshness_hours
+    { name: "cleanup", interval: `${settings.min_freshness_hours * 3}h` },
   ],
 });
 
