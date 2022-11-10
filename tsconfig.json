@@ -3,7 +3,7 @@
         "compilerOptions": {
                 "resolveJsonModule": true,
                 "target": "es2017",
-                "types": ["node"],
+                "types": ["node", "jest"],
                 "moduleResolution": "node",
                 "outDir": "./dist/",
         }
