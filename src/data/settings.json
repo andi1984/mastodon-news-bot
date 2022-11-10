@@ -14,5 +14,27 @@
     "saarinfo": "https://www.saarinfos.de/feed/"
   },
   "feed_hashtags": ["news", "saarland"],
-  "min_freshness_hours": 24
+  "min_freshness_hours": 24,
+  "cw_mapping": [
+          {
+                "label": "Gewalt",
+                "id": "gewalt",
+                "words": ["gewalt", "schlägerei", "stecherei", "tötung"]
+          },
+          {
+                  "label": "Unfall",
+                  "id": "unfall",
+                  "words": ["verunglückt", "unfall", "crash", "verletzt"]
+          },
+           {
+                   "label": "Feuer",
+                   "id": "feuer",
+                   "words": ["brand"]
+           },
+          {
+                  "label": "Verletzung",
+                  "id": "verletzung",
+                  "words": ["verletzt"]
+          }
+  ]
 }

@@ -1,6 +1,7 @@
 import createClient from "../helper/db";
 import getInstance from "../helper/login";
 import rssFeedItem2Toot, { FeedItem } from "../helper/rssFeedItem2Toot";
+import feed2CW from "../helper/feed2CW";
 
 import settings from "../data/settings.json";
 
@@ -57,7 +58,10 @@ const { parentPort } = require("worker_threads");
     const tootText = rssFeedItem2Toot(article, settings.feed_hashtags);
 
     // Toot the article
-    await mastoClient.statuses.create({ status: tootText });
+    await mastoClient.statuses.create({
+      status: tootText,
+      spoilerText: feed2CW(tootText, settings),
+    });
 
     // Mark the article as tooted in the db
     const { data: updatedData, error: errorOnUpdate } = await db
