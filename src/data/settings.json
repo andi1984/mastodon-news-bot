@@ -8,7 +8,8 @@
     "regio-news": "https://regio.news/feed/",
     "fahrrad": "https://www.fahrrad.saarland/feed/",
     "feddit": "https://feddit.de/feeds/c/saarland.xml",
-    "saarinfo": "https://www.saarinfos.de/feed/"
+    "saarinfo": "https://www.saarinfos.de/feed/",
+    "polizei": "https://www.presseportal.de/rss/polizei/laender/13.rss2"
   },
   "feed_hashtags": ["news", "saarland"],
   "min_freshness_hours": 24,
