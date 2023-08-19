@@ -5,7 +5,6 @@
   "feeds": {
     "saarnews": "https://www.saarnews.com/feed/",
     "breaking-news": "https://breaking-news-saarland.de/feed",
-    "regio-news": "https://regio.news/feed/",
     "fahrrad": "https://www.fahrrad.saarland/feed/",
     "feddit": "https://feddit.de/feeds/c/saarland.xml",
     "saarinfo": "https://www.saarinfos.de/feed/",
