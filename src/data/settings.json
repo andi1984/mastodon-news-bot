@@ -8,7 +8,8 @@
     "fahrrad": "https://www.fahrrad.saarland/feed/",
     "feddit": "https://feddit.de/feeds/c/saarland.xml",
     "saarinfo": "https://www.saarinfos.de/feed/",
-    "polizei": "https://www.presseportal.de/rss/polizei/laender/13.rss2"
+    "polizei": "https://www.presseportal.de/rss/polizei/laender/13.rss2",
+    "tagesschau": "https://www.tagesschau.de/inland/regional/saarland/index~rss2.xml"
   },
   "feed_hashtags": ["news", "saarland"],
   "min_freshness_hours": 24,
