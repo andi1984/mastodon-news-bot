@@ -1,8 +1,7 @@
-import type { MastoClient } from "masto";
-import masto = require("masto");
+import { createRestAPIClient } from "masto";
 
-const getInstance = async (): Promise<MastoClient> => {
-  return await masto.login({
+const getInstance = async () => {
+  return await createRestAPIClient({
     url: process.env.API_INSTANCE as string,
     accessToken: process.env.ACCESS_TOKEN as string,
   });

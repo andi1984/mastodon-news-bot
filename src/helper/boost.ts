@@ -1,4 +1,4 @@
-import { MastoClient, Status } from "masto";
+import type { mastodon } from "masto";
 
 import login from "./login";
 import settings from "../data/settings.json";
@@ -6,8 +6,8 @@ import settings from "../data/settings.json";
 /**
  * Boost a status after several checks.
  */
-const boost = async (status: Status) => {
-  const mastoInstance: MastoClient = await login();
+const boost = async (status: mastodon.v1.Status) => {
+  const mastoInstance = await login();
 
   // Check if status is not a reply
   const isReply = !!status.inReplyToId;
@@ -16,7 +16,9 @@ const boost = async (status: Status) => {
 
   // If it is not a reply and does not come from us, we boost it!
   if (!isReply && !isFromUs) {
-    await mastoInstance.statuses.reblog(status.id, { visibility: "public" });
+    await mastoInstance.v1.statuses
+      .$select(status.id)
+      .reblog({ visibility: "public" });
   }
 };
 

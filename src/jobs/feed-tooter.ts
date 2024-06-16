@@ -58,10 +58,13 @@ const { parentPort } = require("worker_threads");
     const tootText = rssFeedItem2Toot(article, settings.feed_hashtags);
 
     // Toot the article
-    await mastoClient.statuses.create({
+    await mastoClient.v1.statuses.create({
       status: tootText,
       spoilerText: feed2CW(tootText, settings),
+      visibility: "public",
+      language: "de",
     });
+    console.log("Visibility public");
 
     // Mark the article as tooted in the db
     const { data: updatedData, error: errorOnUpdate } = await db

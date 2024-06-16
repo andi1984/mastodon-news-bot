@@ -8,6 +8,7 @@ const Bree = require("bree");
 console.log(
   "starting bree, min freshness hours: " + settings.min_freshness_hours
 );
+
 const bree = new Bree({
   root: path.join(__dirname, "jobs"),
   /**
@@ -18,7 +19,7 @@ const bree = new Bree({
   defaultExtension: process.env.TS_NODE ? "ts" : "js",
   jobs: [
     { name: "feed-grabber", interval: "1h" },
-    { name: "feed-tooter", interval: "30m" },
+    { name: "feed-tooter", interval: "1m" },
     { name: "alive", interval: "30m" },
     // Make sure cleanup happens AFTER min_freshness_hours
     { name: "cleanup", interval: `${settings.min_freshness_hours * 3}h` },

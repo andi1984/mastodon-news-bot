@@ -6,6 +6,7 @@ import settings from "../data/settings.json";
 (async () => {
   const { parentPort } = require("worker_threads");
   console.log("Starting latest hashtag boost worker");
+  console.log("foo");
 
   await asyncForEach(settings.hashtags, async (hashtag: string) => {
     await hashtagBoost(hashtag);
