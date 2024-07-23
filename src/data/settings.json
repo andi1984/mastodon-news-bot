@@ -6,7 +6,6 @@
     "saarnews": "https://www.saarnews.com/feed/",
     "breaking-news": "https://breaking-news-saarland.de/feed",
     "fahrrad": "https://www.fahrrad.saarland/feed/",
-    "feddit": "https://feddit.de/feeds/c/saarland.xml",
     "polizei": "https://www.presseportal.de/rss/polizei/laender/13.rss2",
     "tagesschau": "https://www.tagesschau.de/inland/regional/saarland/index~rss2.xml"
   },
