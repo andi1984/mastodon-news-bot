@@ -19,7 +19,7 @@ const bree = new Bree({
   defaultExtension: process.env.TS_NODE ? "ts" : "js",
   jobs: [
     { name: "feed-grabber", interval: "1h" },
-    { name: "feed-tooter", interval: "2h" },
+    { name: "feed-tooter", interval: "2m" },
     { name: "alive", interval: "30m" },
     // Make sure cleanup happens AFTER min_freshness_hours
     { name: "cleanup", interval: `${settings.min_freshness_hours * 3}h` },
