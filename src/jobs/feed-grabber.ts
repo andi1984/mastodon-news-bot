@@ -26,10 +26,13 @@ type DB_ITEM = {
 
     const newData = await asyncFilter(
       rssData.items.map((item: any) => {
+        const rawDate = item.pubDate ?? item.isoDate;
+        const parsed = rawDate ? new Date(rawDate) : new Date();
+        const pubDate = isNaN(parsed.getTime()) ? new Date() : parsed;
         return {
           hash: `${tableId}-${sha256(item.title)}-${sha256(item.link)}}`,
           data: JSON.stringify(item),
-          pub_date: new Date(item.pubDate).toISOString(),
+          pub_date: pubDate.toISOString(),
         };
       }),
       async (item: DB_ITEM) => {
