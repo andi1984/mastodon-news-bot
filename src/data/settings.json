@@ -13,7 +13,7 @@
     "mfw-events": "https://www.saarland.de/mfw/DE/aktuelles/rss-feed/_feeds/veranstaltungen_feed.xml",
     "mfw-pressemitteilungen": "https://www.saarland.de/mfw/DE/aktuelles/rss-feed/_feeds/pressemitteilungen_feed.xml"
   },
-  "feed_hashtags": ["news", "saarland"],
+  "feed_hashtags": ["news", "saarlandnews"],
   "min_freshness_hours": 24,
   "cw_mapping": [
     {
