@@ -22,6 +22,18 @@
     "mfw-events": ["veranstaltung"],
     "mfw-pressemitteilungen": ["pressemitteilung"]
   },
+  "toot_batch_size": 3,
+  "feed_priorities": {
+    "saarbruecker-zeitung": 0.1,
+    "tagesschau": 0.3,
+    "saarnews": 0.4,
+    "polizei": 0.5,
+    "breaking-news": 0.7,
+    "dudplaner": 0.9,
+    "fahrrad": 1.0,
+    "mfw-events": 0.9,
+    "mfw-pressemitteilungen": 0.9
+  },
   "min_freshness_hours": 24,
   "auto_reply_text": "Dieser Toot wurde automatisch von einem Bot erstellt. Leider kann ich auf Antworten nicht eingehen. Bei Fragen wende dich bitte direkt an die jeweilige Nachrichtenquelle.",
   "cw_mapping": [

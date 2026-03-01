@@ -18,8 +18,12 @@ const bree = new Bree({
    */
   defaultExtension: process.env.TS_NODE ? "ts" : "js",
   jobs: [
-    { name: "feed-grabber", interval: "1h" },
-    { name: "feed-tooter", interval: "2h" },
+    // Day schedule (06:00–21:59): frequent grabbing & tooting
+    { name: "feed-grabber-day", path: "feed-grabber", cron: "*/20 6-21 * * *" },
+    { name: "feed-tooter-day", path: "feed-tooter", cron: "*/30 6-21 * * *" },
+    // Night schedule: minimal activity
+    { name: "feed-grabber-night", path: "feed-grabber", cron: "0 0,3 * * *" },
+    { name: "feed-tooter-night", path: "feed-tooter", cron: "0 1 * * *" },
     { name: "alive", interval: "30m" },
     { name: "mention-replier", interval: "15m" },
     // Make sure cleanup happens AFTER min_freshness_hours
