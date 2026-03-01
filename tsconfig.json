@@ -5,6 +5,9 @@
                 "module": "NodeNext",
                 "moduleResolution": "NodeNext",
                 "types": ["node", "jest"],
+                "rootDir": "./src/",
                 "outDir": "./dist/"
-        }
+        },
+        "include": ["src/**/*"],
+        "exclude": ["node_modules", "dist", "scripts"]
 }
