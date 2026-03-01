@@ -4,6 +4,13 @@ import getInstance from "../helper/login.js";
 import rssFeedItem2Toot, { FeedItem } from "../helper/rssFeedItem2Toot.js";
 import feed2CW from "../helper/feed2CW.js";
 import fetchImage from "../helper/fetchImage.js";
+import {
+  clusterArticles,
+  pickPrimaryArticle,
+  isBreakingNews,
+  ClusterArticle,
+} from "../helper/similarity.js";
+import { formatClusterToot } from "../helper/clusterFormatter.js";
 
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
@@ -13,6 +20,13 @@ const BATCH_SIZE = (settings as any).toot_batch_size ?? 3;
 const FEED_PRIORITIES: Record<string, number> =
   (settings as any).feed_priorities ?? {};
 const MIN_FRESHNESS_HOURS = settings.min_freshness_hours || 24;
+const SIMILARITY_THRESHOLD = (settings as any).similarity_threshold ?? 0.4;
+const BREAKING_NEWS_MIN_SOURCES =
+  (settings as any).breaking_news_min_sources ?? 3;
+const BREAKING_NEWS_TIME_WINDOW =
+  (settings as any).breaking_news_time_window_hours ?? 2;
+const BREAKING_NEWS_BOOST =
+  (settings as any).breaking_news_priority_boost ?? 2.0;
 
 function scoreFeedItem(
   feedKey: string | undefined,
@@ -35,12 +49,14 @@ function sleep(ms: number): Promise<void> {
 
 (async () => {
   const db = createClient();
-  let query = db
+
+  // 1. Fetch untooted articles (increased limit for better clustering)
+  let untootedQuery = db
     .from(settings.db_table)
     .select("id,data,pub_date")
     .is("tooted", false)
     .order("pub_date", { ascending: false })
-    .limit(20);
+    .limit(50);
 
   if (settings.min_freshness_hours) {
     const minFreshnessDate = new Date();
@@ -50,15 +66,37 @@ function sleep(ms: number): Promise<void> {
     console.log(
       `Applying freshness filter for items from ${minFreshnessDate} or later.`
     );
-    query = query.filter("pub_date", "gt", minFreshnessDate.toISOString());
+    untootedQuery = untootedQuery.filter(
+      "pub_date",
+      "gt",
+      minFreshnessDate.toISOString()
+    );
   }
 
-  let { data: feeds, error } = await query;
+  // 2. Fetch recently-tooted articles from last 2h for suppression
+  const recentCutoff = new Date();
+  recentCutoff.setHours(recentCutoff.getHours() - BREAKING_NEWS_TIME_WINDOW);
 
-  if (error) {
-    console.log(error.message);
-    throw error;
+  const recentTootedQuery = db
+    .from(settings.db_table)
+    .select("id,data,pub_date")
+    .is("tooted", true)
+    .filter("pub_date", "gt", recentCutoff.toISOString())
+    .order("pub_date", { ascending: false })
+    .limit(50);
+
+  const [untootedResult, recentTootedResult] = await Promise.all([
+    untootedQuery,
+    recentTootedQuery,
+  ]);
+
+  if (untootedResult.error) {
+    console.log(untootedResult.error.message);
+    throw untootedResult.error;
   }
+
+  const feeds = untootedResult.data;
+  const recentTooted = recentTootedResult.data || [];
 
   if (!feeds || feeds.length === 0) {
     console.log("ALARM: Kein Feed-Inhalt mehr da zum tooten!");
@@ -67,51 +105,141 @@ function sleep(ms: number): Promise<void> {
     return;
   }
 
-  // Score and rank candidates
-  const scored = feeds.map(
+  // Parse all untooted articles into ClusterArticle format
+  const untootedArticles: ClusterArticle[] = feeds.map(
     (row: { id: string; data: string; pub_date: string }) => {
       const article: FeedItem = JSON.parse(row.data);
       const feedKey = (article as any)._feedKey as string | undefined;
       const score = scoreFeedItem(feedKey, row.pub_date);
-      return { id: row.id, article, feedKey, score };
+      return { id: row.id, article, feedKey, pubDate: row.pub_date, score };
     }
   );
 
-  scored.sort((a: { score: number }, b: { score: number }) => b.score - a.score);
-  const batch = scored.slice(0, BATCH_SIZE);
+  // Parse recently-tooted articles
+  const recentTootedArticles: ClusterArticle[] = recentTooted.map(
+    (row: { id: string; data: string; pub_date: string }) => {
+      const article: FeedItem = JSON.parse(row.data);
+      const feedKey = (article as any)._feedKey as string | undefined;
+      return {
+        id: row.id,
+        article,
+        feedKey,
+        pubDate: row.pub_date,
+        score: 0,
+      };
+    }
+  );
+
+  // 3. Cluster all articles together (untooted + recently tooted for suppression)
+  const allArticles = [...untootedArticles, ...recentTootedArticles];
+  const clusters = clusterArticles(allArticles, SIMILARITY_THRESHOLD);
+
+  // Track which untooted IDs to suppress (matched with already-tooted articles)
+  const tootedIds = new Set(recentTootedArticles.map((a) => a.id));
+  const suppressIds = new Set<string>();
+
+  // Separate clusters into postable vs suppressed
+  type ScoredCluster = {
+    articles: ClusterArticle[];
+    clusterScore: number;
+    isBreaking: boolean;
+  };
+  const postableClusters: ScoredCluster[] = [];
+
+  for (const [, cluster] of clusters) {
+    const hasTooted = cluster.some((a) => tootedIds.has(a.id));
+    const untootedInCluster = cluster.filter((a) => !tootedIds.has(a.id));
+
+    if (hasTooted) {
+      // Suppress all untooted articles that match an already-tooted story
+      for (const a of untootedInCluster) {
+        suppressIds.add(a.id);
+      }
+      continue;
+    }
+
+    if (untootedInCluster.length === 0) continue;
+
+    // 4. Score the cluster
+    const bestScore = Math.max(...untootedInCluster.map((a) => a.score));
+    const sourceBoost = 1 + (untootedInCluster.length - 1) * 0.15;
+    const breaking = isBreakingNews(
+      untootedInCluster,
+      BREAKING_NEWS_TIME_WINDOW,
+      BREAKING_NEWS_MIN_SOURCES
+    );
+    const breakingBoost = breaking ? BREAKING_NEWS_BOOST : 1.0;
+    const clusterScore = bestScore * sourceBoost * breakingBoost;
+
+    postableClusters.push({
+      articles: untootedInCluster,
+      clusterScore,
+      isBreaking: breaking,
+    });
+  }
+
+  // Mark suppressed articles as tooted
+  if (suppressIds.size > 0) {
+    const ids = Array.from(suppressIds);
+    console.log(
+      `Suppressing ${ids.length} articles that match already-tooted stories`
+    );
+    const { error: suppressError } = await db
+      .from(settings.db_table)
+      .update({ tooted: true })
+      .in("id", ids);
+
+    if (suppressError) {
+      console.error(`Failed to suppress articles: ${suppressError.message}`);
+    }
+  }
+
+  // 5. Sort clusters by score, pick top BATCH_SIZE
+  postableClusters.sort((a, b) => b.clusterScore - a.clusterScore);
+  const batch = postableClusters.slice(0, BATCH_SIZE);
 
   console.log(
-    `Scoring: ${scored.length} candidates, posting top ${batch.length}`
+    `Clustering: ${untootedArticles.length} untooted articles → ${postableClusters.length} clusters, posting top ${batch.length}`
   );
-  for (const item of batch) {
+  for (const c of batch) {
+    const primary = pickPrimaryArticle(c.articles, FEED_PRIORITIES);
     console.log(
-      `  feed=${item.feedKey ?? "unknown"} score=${item.score.toFixed(3)} id=${item.id}`
+      `  cluster: ${c.articles.length} articles, score=${c.clusterScore.toFixed(3)}, breaking=${c.isBreaking}, primary=${primary.feedKey ?? "unknown"}`
     );
+  }
+
+  if (batch.length === 0) {
+    console.log("No clusters to post.");
+    if (parentPort) parentPort.postMessage("done");
+    else process.exit(0);
+    return;
   }
 
   const mastoClient = await getInstance();
 
-  for (const item of batch) {
+  // 6. Post each cluster
+  for (const cluster of batch) {
     try {
-      const feedSpecificHashtags =
-        item.feedKey && (settings as any).feed_specific_hashtags?.[item.feedKey];
-      const hashtags = [
-        ...settings.feed_hashtags,
-        ...(feedSpecificHashtags || []),
-      ];
+      const primary = pickPrimaryArticle(cluster.articles, FEED_PRIORITIES);
 
-      const tootText = rssFeedItem2Toot(item.article, hashtags);
+      const tootText = formatClusterToot(cluster.articles, {
+        feedPriorities: FEED_PRIORITIES,
+        feedHashtags: settings.feed_hashtags,
+        feedSpecificHashtags: (settings as any).feed_specific_hashtags,
+        breakingNewsMinSources: BREAKING_NEWS_MIN_SOURCES,
+        breakingNewsTimeWindowHours: BREAKING_NEWS_TIME_WINDOW,
+      });
 
-      // Try to fetch and upload an article image
+      // Try to fetch and upload an image from the primary article
       let mediaIds: string[] | undefined;
-      const enclosure = (item.article as any).enclosure;
+      const enclosure = (primary.article as any).enclosure;
       if (enclosure?.url) {
         try {
           const imageBlob = await fetchImage(enclosure.url);
           if (imageBlob) {
             const attachment = await mastoClient.v2.media.create({
               file: imageBlob,
-              description: item.article.title || "",
+              description: primary.article.title || "",
             });
             mediaIds = [attachment.id];
             console.log(`Image attached: ${enclosure.url}`);
@@ -131,25 +259,29 @@ function sleep(ms: number): Promise<void> {
         ...(mediaIds ? { mediaIds } : {}),
       });
 
+      // 7. Mark ALL articles in the cluster as tooted
+      const clusterIds = cluster.articles.map((a) => a.id);
       const { error: errorOnUpdate } = await db
         .from(settings.db_table)
         .update({ tooted: true })
-        .match({ id: item.id });
+        .in("id", clusterIds);
 
       if (errorOnUpdate) {
         console.error(
-          `Failed to mark article ${item.id} as tooted: ${errorOnUpdate.message}`
+          `Failed to mark cluster articles as tooted: ${errorOnUpdate.message}`
         );
       } else {
-        console.log(`Tooted and marked article ${item.id} (feed=${item.feedKey})`);
+        console.log(
+          `Tooted cluster: ${clusterIds.length} articles [${clusterIds.join(", ")}] (primary=${primary.feedKey}${cluster.isBreaking ? ", BREAKING" : ""})`
+        );
       }
 
       // Delay between toots to avoid rate-limiting
-      if (item !== batch[batch.length - 1]) {
+      if (cluster !== batch[batch.length - 1]) {
         await sleep(5000);
       }
     } catch (e) {
-      console.error(`Failed to toot article ${item.id}: ${e}`);
+      console.error(`Failed to toot cluster: ${e}`);
     }
   }
 

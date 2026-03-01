@@ -35,6 +35,10 @@
     "mfw-pressemitteilungen": 0.9
   },
   "min_freshness_hours": 24,
+  "similarity_threshold": 0.4,
+  "breaking_news_min_sources": 3,
+  "breaking_news_time_window_hours": 2,
+  "breaking_news_priority_boost": 2.0,
   "auto_reply_text": "Dieser Toot wurde automatisch von einem Bot erstellt. Leider kann ich auf Antworten nicht eingehen. Bei Fragen wende dich bitte direkt an die jeweilige Nachrichtenquelle.",
   "cw_mapping": [
     {
