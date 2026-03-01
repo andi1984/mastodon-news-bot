@@ -14,6 +14,14 @@
     "mfw-pressemitteilungen": "https://www.saarland.de/mfw/DE/aktuelles/rss-feed/_feeds/pressemitteilungen_feed.xml"
   },
   "feed_hashtags": ["news", "saarlandnews"],
+  "feed_specific_hashtags": {
+    "polizei": ["polizei", "blaulicht"],
+    "fahrrad": ["fahrrad", "radverkehr"],
+    "tagesschau": ["tagesschau"],
+    "saarbruecker-zeitung": ["saarbrückerzeitung"],
+    "mfw-events": ["veranstaltung"],
+    "mfw-pressemitteilungen": ["pressemitteilung"]
+  },
   "min_freshness_hours": 24,
   "cw_mapping": [
     {

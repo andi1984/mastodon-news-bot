@@ -6,4 +6,6 @@ type SingleCWMapping = {
 
 export type Settings = {
   cw_mapping: SingleCWMapping[];
+  feed_hashtags: string[];
+  feed_specific_hashtags?: Record<string, string[]>;
 };

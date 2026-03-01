@@ -2,6 +2,7 @@ import { Settings } from "../types/settings";
 import feed2CW from "./feed2CW";
 
 const settings: Settings = {
+  feed_hashtags: [],
   cw_mapping: [
     {
       id: "foo",

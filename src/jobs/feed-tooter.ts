@@ -2,6 +2,7 @@ import createClient from "../helper/db";
 import getInstance from "../helper/login";
 import rssFeedItem2Toot, { FeedItem } from "../helper/rssFeedItem2Toot";
 import feed2CW from "../helper/feed2CW";
+import fetchImage from "../helper/fetchImage";
 
 import settings from "../data/settings.json";
 
@@ -54,8 +55,35 @@ const { parentPort } = require("worker_threads");
     // Connect to Mastodon
     const mastoClient = await getInstance();
 
-    // TODO: "Intelligently" computing the hashtags?
-    const tootText = rssFeedItem2Toot(article, settings.feed_hashtags);
+    // Compute hashtags: base hashtags + feed-specific hashtags
+    const feedKey = (article as any)._feedKey as string | undefined;
+    const feedSpecificHashtags =
+      feedKey && (settings as any).feed_specific_hashtags?.[feedKey];
+    const hashtags = [
+      ...settings.feed_hashtags,
+      ...(feedSpecificHashtags || []),
+    ];
+
+    const tootText = rssFeedItem2Toot(article, hashtags);
+
+    // Try to fetch and upload an article image
+    let mediaIds: string[] | undefined;
+    const enclosure = (article as any).enclosure;
+    if (enclosure?.url) {
+      try {
+        const imageBlob = await fetchImage(enclosure.url);
+        if (imageBlob) {
+          const attachment = await mastoClient.v2.media.create({
+            file: imageBlob,
+            description: article.title || "",
+          });
+          mediaIds = [attachment.id];
+          console.log(`Image attached: ${enclosure.url}`);
+        }
+      } catch (imgErr) {
+        console.error(`Image upload failed, tooting without image: ${imgErr}`);
+      }
+    }
 
     // Toot the article
     await mastoClient.v1.statuses.create({
@@ -63,6 +91,7 @@ const { parentPort } = require("worker_threads");
       spoilerText: feed2CW(tootText, settings),
       visibility: "public",
       language: "de",
+      ...(mediaIds ? { mediaIds } : {}),
     });
     console.log("Visibility public");
 

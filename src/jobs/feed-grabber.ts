@@ -18,7 +18,7 @@ type DB_ITEM = {
 
 // Iterate over all feeds
 (async () => {
-  await asyncForEach(Object.values(settings.feeds), async (feedURL: string) => {
+  await asyncForEach(Object.entries(settings.feeds), async ([feedKey, feedURL]: [string, string]) => {
     const rssData: { items: any[] } = await getFeed(feedURL);
 
     // 1. Hash feedURL to get a unique id for the table
@@ -31,7 +31,7 @@ type DB_ITEM = {
         const pubDate = isNaN(parsed.getTime()) ? new Date() : parsed;
         return {
           hash: `${tableId}-${sha256(item.title)}-${sha256(item.link)}}`,
-          data: JSON.stringify(item),
+          data: JSON.stringify({ ...item, _feedKey: feedKey }),
           pub_date: pubDate.toISOString(),
         };
       }),
