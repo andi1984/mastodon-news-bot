@@ -21,6 +21,7 @@ const bree = new Bree({
     { name: "feed-grabber", interval: "1h" },
     { name: "feed-tooter", interval: "2h" },
     { name: "alive", interval: "30m" },
+    { name: "mention-replier", interval: "15m" },
     // Make sure cleanup happens AFTER min_freshness_hours
     { name: "cleanup", interval: `${settings.min_freshness_hours * 3}h` },
   ],

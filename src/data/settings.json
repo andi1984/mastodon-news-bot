@@ -23,6 +23,7 @@
     "mfw-pressemitteilungen": ["pressemitteilung"]
   },
   "min_freshness_hours": 24,
+  "auto_reply_text": "Dieser Toot wurde automatisch von einem Bot erstellt. Leider kann ich auf Antworten nicht eingehen. Bei Fragen wende dich bitte direkt an die jeweilige Nachrichtenquelle.",
   "cw_mapping": [
     {
       "label": "Gewalt",
