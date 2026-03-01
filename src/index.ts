@@ -33,6 +33,10 @@ const bree = new Bree({
     { name: "alive", interval: "30m" },
     // Make sure cleanup happens AFTER min_freshness_hours
     { name: "cleanup", interval: `${settings.min_freshness_hours * 3}h` },
+    // Daily digest at 22:00 — after the last daytime toot batch (21:30)
+    { name: "daily-digest", path: path.join(jobsRoot, `daily-digest.${ext}`), cron: "0 22 * * *" },
+    // Weekly digest every Sunday at 20:00
+    { name: "weekly-digest", path: path.join(jobsRoot, `weekly-digest.${ext}`), cron: "0 20 * * 0" },
   ],
 });
 
