@@ -31,7 +31,6 @@ const bree = new Bree({
     { name: "feed-grabber-night", path: path.join(jobsRoot, `feed-grabber.${ext}`), cron: "0 0,3 * * *" },
     { name: "feed-tooter-night", path: path.join(jobsRoot, `feed-tooter.${ext}`), cron: "0 1 * * *" },
     { name: "alive", interval: "30m" },
-    { name: "mention-replier", interval: "15m" },
     // Make sure cleanup happens AFTER min_freshness_hours
     { name: "cleanup", interval: `${settings.min_freshness_hours * 3}h` },
   ],

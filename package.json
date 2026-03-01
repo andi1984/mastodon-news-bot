@@ -12,7 +12,8 @@
     "watch": "TS_NODE=true NODE_OPTIONS=\"--loader ts-node/esm\" nodemon ./src/index.ts",
     "build": "tsc && mkdir -p dist/data && cp src/data/settings.json dist/data/settings.json",
     "dev": "TS_NODE=true NODE_OPTIONS=\"--loader ts-node/esm\" node src/index.ts",
-    "start": "node ./scripts/create-env.cjs && node ./dist/index.js"
+    "start": "node ./scripts/create-env.cjs && node ./dist/index.js",
+    "cleanup-replies": "TS_NODE=true NODE_OPTIONS=\"--loader ts-node/esm\" node scripts/cleanup-auto-replies.ts"
   },
   "author": "Andreas Sander (mail@andi1984.de)",
   "license": "MIT",
