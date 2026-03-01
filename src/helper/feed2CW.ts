@@ -1,4 +1,4 @@
-import { Settings } from "../types/settings";
+import { Settings } from "../types/settings.js";
 /**
  * Given a feed text, returns content warning in case text should be behind or not
  **/

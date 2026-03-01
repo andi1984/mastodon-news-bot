@@ -1,7 +1,7 @@
 import type { mastodon } from "masto";
-import login from "./login";
-import { asyncForEach } from "./async";
-import boost from "./boost";
+import login from "./login.js";
+import { asyncForEach } from "./async.js";
+import boost from "./boost.js";
 
 const hashtagBoost = async (hashtag: string) => {
   const mastoInstance = await login();

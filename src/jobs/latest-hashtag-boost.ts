@@ -1,10 +1,10 @@
-import hashtagBoost from "../helper/hashtagBoost";
-import { asyncForEach } from "../helper/async";
+import { parentPort } from "node:worker_threads";
+import hashtagBoost from "../helper/hashtagBoost.js";
+import { asyncForEach } from "../helper/async.js";
 
-import settings from "../data/settings.json";
+import settings from "../data/settings.json" assert { type: "json" };
 
 (async () => {
-  const { parentPort } = require("worker_threads");
   console.log("Starting latest hashtag boost worker");
   console.log("foo");
 

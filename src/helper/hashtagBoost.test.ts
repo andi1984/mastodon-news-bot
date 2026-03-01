@@ -19,7 +19,7 @@ jest.mock("./login", () => ({
   default: jest.fn(() => Promise.resolve(mockClient)),
 }));
 
-import hashtagBoost from "./hashtagBoost";
+import hashtagBoost from "./hashtagBoost.js";
 
 describe("hashtagBoost", () => {
   beforeEach(() => {

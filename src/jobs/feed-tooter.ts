@@ -1,12 +1,11 @@
-import createClient from "../helper/db";
-import getInstance from "../helper/login";
-import rssFeedItem2Toot, { FeedItem } from "../helper/rssFeedItem2Toot";
-import feed2CW from "../helper/feed2CW";
-import fetchImage from "../helper/fetchImage";
+import { parentPort } from "node:worker_threads";
+import createClient from "../helper/db.js";
+import getInstance from "../helper/login.js";
+import rssFeedItem2Toot, { FeedItem } from "../helper/rssFeedItem2Toot.js";
+import feed2CW from "../helper/feed2CW.js";
+import fetchImage from "../helper/fetchImage.js";
 
-import settings from "../data/settings.json";
-
-const { parentPort } = require("worker_threads");
+import settings from "../data/settings.json" assert { type: "json" };
 
 const BATCH_SIZE = (settings as any).toot_batch_size ?? 3;
 const FEED_PRIORITIES: Record<string, number> =

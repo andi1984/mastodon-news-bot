@@ -1,12 +1,11 @@
-import settings from "../data/settings.json";
+import { parentPort } from "node:worker_threads";
+import settings from "../data/settings.json" assert { type: "json" };
 
-import getFeed from "../helper/getFeed";
-import createClient from "../helper/db";
+import getFeed from "../helper/getFeed.js";
+import createClient from "../helper/db.js";
 
-import sha256 from "crypto-js/sha256";
-import { asyncForEach } from "../helper/async";
-
-const { parentPort } = require("worker_threads");
+import CryptoJS from "crypto-js";
+import { asyncForEach } from "../helper/async.js";
 
 // Create a single supabase client for interacting with your database
 const supabase = createClient();
@@ -17,14 +16,14 @@ const supabase = createClient();
     const rssData: { items: any[] } = await getFeed(feedURL);
 
     // 1. Hash feedURL to get a unique id for the table
-    const tableId = sha256(feedURL);
+    const tableId = CryptoJS.SHA256(feedURL);
 
     const candidates = rssData.items.map((item: any) => {
       const rawDate = item.pubDate ?? item.isoDate;
       const parsed = rawDate ? new Date(rawDate) : new Date();
       const pubDate = isNaN(parsed.getTime()) ? new Date() : parsed;
       return {
-        hash: `${tableId}-${sha256(item.title)}-${sha256(item.link)}`,
+        hash: `${tableId}-${CryptoJS.SHA256(item.title)}-${CryptoJS.SHA256(item.link)}`,
         data: JSON.stringify({ ...item, _feedKey: feedKey }),
         pub_date: pubDate.toISOString(),
       };

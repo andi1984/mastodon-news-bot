@@ -1,7 +1,7 @@
 import type { mastodon } from "masto";
 
-import login from "./login";
-import settings from "../data/settings.json";
+import login from "./login.js";
+import settings from "../data/settings.json" assert { type: "json" };
 
 /**
  * Boost a status after several checks.

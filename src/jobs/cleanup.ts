@@ -1,6 +1,6 @@
-const { parentPort } = require("worker_threads");
-import settings from "../data/settings.json";
-import createClient from "../helper/db";
+import { parentPort } from "node:worker_threads";
+import settings from "../data/settings.json" assert { type: "json" };
+import createClient from "../helper/db.js";
 
 // Create a single supabase client for interacting with your database
 const supabase = createClient();

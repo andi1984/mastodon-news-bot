@@ -1,9 +1,10 @@
-require("dotenv").config();
-import settings from "./data/settings.json";
+import "dotenv/config";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import Bree from "bree";
+import settings from "./data/settings.json" assert { type: "json" };
 
-const path = require("path");
-
-const Bree = require("bree");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 console.log(
   "starting bree, min freshness hours: " + settings.min_freshness_hours

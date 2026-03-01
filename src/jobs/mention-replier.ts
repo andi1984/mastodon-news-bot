@@ -1,7 +1,6 @@
-import getInstance from "../helper/login";
-import settings from "../data/settings.json";
-
-const { parentPort } = require("worker_threads");
+import { parentPort } from "node:worker_threads";
+import getInstance from "../helper/login.js";
+import settings from "../data/settings.json" assert { type: "json" };
 
 (async () => {
   try {

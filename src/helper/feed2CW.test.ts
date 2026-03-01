@@ -1,5 +1,5 @@
-import { Settings } from "../types/settings";
-import feed2CW from "./feed2CW";
+import { Settings } from "../types/settings.js";
+import feed2CW from "./feed2CW.js";
 
 const settings: Settings = {
   feed_hashtags: [],

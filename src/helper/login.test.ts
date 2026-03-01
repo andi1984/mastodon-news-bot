@@ -8,7 +8,7 @@ jest.mock("masto", () => ({
 
 const mockedCreate = createRestAPIClient as jest.Mock;
 
-import login from "./login";
+import login from "./login.js";
 
 describe("login", () => {
   const ORIG_ENV = process.env;

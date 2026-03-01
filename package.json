@@ -2,16 +2,17 @@
   "name": "mastodon_news_bot",
   "version": "1.0.0",
   "description": "",
+  "type": "module",
   "main": "src/index.ts",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
     "test": "jest",
-    "watch": "TS_NODE=true NODE_OPTIONS=\"-r ts-node/register\" nodemon ./src/index.ts",
+    "watch": "TS_NODE=true NODE_OPTIONS=\"--loader ts-node/esm\" nodemon ./src/index.ts",
     "build": "tsc",
-    "dev": "TS_NODE=true NODE_OPTIONS=\"-r ts-node/register\" node src/index.ts",
-    "start": "node ./scripts/create-env.js && node ./dist/index.js"
+    "dev": "TS_NODE=true NODE_OPTIONS=\"--loader ts-node/esm\" node src/index.ts",
+    "start": "node ./scripts/create-env.cjs && node ./dist/index.js"
   },
   "author": "Andreas Sander (mail@andi1984.de)",
   "license": "MIT",
@@ -41,7 +42,20 @@
   "private": true,
   "jest": {
     "transform": {
-      "^.+\\.tsx?$": "ts-jest"
-    }
+      "^.+\\.tsx?$": ["ts-jest", {
+        "tsconfig": {
+          "module": "commonjs",
+          "moduleResolution": "node",
+          "resolveJsonModule": true,
+          "esModuleInterop": true,
+          "types": ["node", "jest"]
+        },
+        "diagnostics": false
+      }]
+    },
+    "moduleNameMapper": {
+      "^(\\.{1,2}/.*)\\.js$": "$1"
+    },
+    "testPathIgnorePatterns": ["/node_modules/", "/dist/"]
   }
 }

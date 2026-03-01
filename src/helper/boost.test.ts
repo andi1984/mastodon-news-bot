@@ -15,7 +15,7 @@ jest.mock("../data/settings.json", () => ({
   username: "saarlandnews",
 }));
 
-import boost from "./boost";
+import boost from "./boost.js";
 
 function createMockStatus(
   overrides: Partial<{ id: string; inReplyToId: string | null; acct: string }>
