@@ -2,7 +2,9 @@ import "dotenv/config";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Bree from "bree";
-import settings from "./data/settings.json" assert { type: "json" };
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
+const settings = require("./data/settings.json");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

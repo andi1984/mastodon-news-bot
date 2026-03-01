@@ -2,7 +2,9 @@ import { parentPort } from "node:worker_threads";
 import hashtagBoost from "../helper/hashtagBoost.js";
 import { asyncForEach } from "../helper/async.js";
 
-import settings from "../data/settings.json" assert { type: "json" };
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
+const settings = require("../data/settings.json");
 
 (async () => {
   console.log("Starting latest hashtag boost worker");

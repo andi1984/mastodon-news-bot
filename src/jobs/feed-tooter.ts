@@ -5,7 +5,9 @@ import rssFeedItem2Toot, { FeedItem } from "../helper/rssFeedItem2Toot.js";
 import feed2CW from "../helper/feed2CW.js";
 import fetchImage from "../helper/fetchImage.js";
 
-import settings from "../data/settings.json" assert { type: "json" };
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
+const settings = require("../data/settings.json");
 
 const BATCH_SIZE = (settings as any).toot_batch_size ?? 3;
 const FEED_PRIORITIES: Record<string, number> =

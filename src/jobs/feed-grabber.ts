@@ -1,5 +1,7 @@
 import { parentPort } from "node:worker_threads";
-import settings from "../data/settings.json" assert { type: "json" };
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
+const settings = require("../data/settings.json");
 
 import getFeed from "../helper/getFeed.js";
 import createClient from "../helper/db.js";
@@ -12,7 +14,7 @@ const supabase = createClient();
 
 // Iterate over all feeds
 (async () => {
-  await asyncForEach(Object.entries(settings.feeds), async ([feedKey, feedURL]: [string, string]) => {
+  await asyncForEach(Object.entries(settings.feeds) as [string, string][], async ([feedKey, feedURL]: [string, string]) => {
     const rssData: { items: any[] } = await getFeed(feedURL);
 
     // 1. Hash feedURL to get a unique id for the table

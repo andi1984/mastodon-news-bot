@@ -1,7 +1,9 @@
 import type { mastodon } from "masto";
 
 import login from "./login.js";
-import settings from "../data/settings.json" assert { type: "json" };
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
+const settings = require("../data/settings.json");
 
 /**
  * Boost a status after several checks.
