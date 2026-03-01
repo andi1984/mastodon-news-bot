@@ -96,17 +96,16 @@ const { parentPort } = require("worker_threads");
     console.log("Visibility public");
 
     // Mark the article as tooted in the db
-    const { data: updatedData, error: errorOnUpdate } = await db
+    const { error: errorOnUpdate } = await db
       .from(settings.db_table)
       .update({ tooted: true })
-      .match({ id })
-      .select();
+      .match({ id });
 
     if (errorOnUpdate) {
       throw errorOnUpdate;
     }
 
-    console.log("Data updated", updatedData);
+    console.log(`Marked article ${id} as tooted`);
   } catch (e) {
     throw new Error(`Something went wrong: ${e}`);
   } finally {

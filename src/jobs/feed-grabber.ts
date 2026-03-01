@@ -4,17 +4,12 @@ import getFeed from "../helper/getFeed";
 import createClient from "../helper/db";
 
 import sha256 from "crypto-js/sha256";
-import { asyncFilter, asyncForEach } from "../helper/async";
+import { asyncForEach } from "../helper/async";
 
 const { parentPort } = require("worker_threads");
 
 // Create a single supabase client for interacting with your database
 const supabase = createClient();
-
-type DB_ITEM = {
-  hash: string;
-  data: string;
-};
 
 // Iterate over all feeds
 (async () => {
@@ -24,35 +19,42 @@ type DB_ITEM = {
     // 1. Hash feedURL to get a unique id for the table
     const tableId = sha256(feedURL);
 
-    const newData = await asyncFilter(
-      rssData.items.map((item: any) => {
-        const rawDate = item.pubDate ?? item.isoDate;
-        const parsed = rawDate ? new Date(rawDate) : new Date();
-        const pubDate = isNaN(parsed.getTime()) ? new Date() : parsed;
-        return {
-          hash: `${tableId}-${sha256(item.title)}-${sha256(item.link)}}`,
-          data: JSON.stringify({ ...item, _feedKey: feedKey }),
-          pub_date: pubDate.toISOString(),
-        };
-      }),
-      async (item: DB_ITEM) => {
-        // Check that hash isn't already in the table
-        let { data: feeds, error } = await supabase
-          .from(settings.db_table)
-          .select("hash")
-          .in("hash", [item.hash]);
+    const candidates = rssData.items.map((item: any) => {
+      const rawDate = item.pubDate ?? item.isoDate;
+      const parsed = rawDate ? new Date(rawDate) : new Date();
+      const pubDate = isNaN(parsed.getTime()) ? new Date() : parsed;
+      return {
+        hash: `${tableId}-${sha256(item.title)}-${sha256(item.link)}`,
+        data: JSON.stringify({ ...item, _feedKey: feedKey }),
+        pub_date: pubDate.toISOString(),
+      };
+    });
 
-        return (!feeds || feeds.length == 0) && error == null;
-      }
-    );
+    if (candidates.length === 0) return false;
+
+    // Batch-check which hashes already exist (single query instead of N)
+    const { data: existing, error } = await supabase
+      .from(settings.db_table)
+      .select("hash")
+      .in("hash", candidates.map(c => c.hash));
+
+    if (error) {
+      console.error(error.message);
+      return false;
+    }
+
+    const existingSet = new Set((existing ?? []).map((e: { hash: string }) => e.hash));
+    const newData = candidates.filter(c => !existingSet.has(c.hash));
 
     if (newData.length > 0) {
       console.log(`Inserting ${newData.length} new items`);
-      const { data, error } = await supabase
+      const { error: insertError } = await supabase
         .from(settings.db_table)
-        .insert(newData)
-        .select();
-      console.log({ data, error });
+        .insert(newData);
+
+      if (insertError) {
+        console.error(insertError.message);
+      }
 
       return true;
     }

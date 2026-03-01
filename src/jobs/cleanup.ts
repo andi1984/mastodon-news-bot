@@ -10,11 +10,11 @@ const supabase = createClient();
     .from(settings.db_table)
     .delete()
     .eq("tooted", true)
-    .select();
+    .select("id");
 
-  console.log(`Deleted ${data?.length} entries`);
+  console.log(`Deleted ${data?.length ?? 0} tooted entries`);
 
-  if (!!error) {
+  if (error) {
     console.error(error.message);
   }
 
@@ -26,26 +26,19 @@ const supabase = createClient();
       minFreshnessDate.getHours() - settings.min_freshness_hours
     );
 
-    console.log(`Cleaning up items older than ${minFreshnessDate}.`);
-    const { data: freshnessDataPubDate, error: freshnessErrorPubDate } =
-      await supabase
-        .from(settings.db_table)
-        .delete()
-        .filter("pub_date", "lte", minFreshnessDate.toISOString())
-        .eq("tooted", false)
-        .select();
-
-    console.log(`Cleaned up ${freshnessDataPubDate?.length} stale feed items.`);
-
-    console.log(`Cleaning up items older than ${minFreshnessDate}.`);
-    const { data: freshnessData, error: freshnessError } = await supabase
+    console.log(`Cleaning up untooted items older than ${minFreshnessDate}.`);
+    const { data: staleData, error: freshnessError } = await supabase
       .from(settings.db_table)
       .delete()
-      .filter("created_at", "lte", minFreshnessDate.toISOString())
       .eq("tooted", false)
-      .select();
+      .or(`pub_date.lte.${minFreshnessDate.toISOString()},created_at.lte.${minFreshnessDate.toISOString()}`)
+      .select("id");
 
-    console.log(`Cleaned up ${freshnessData?.length} stale feed items.`);
+    console.log(`Cleaned up ${staleData?.length ?? 0} stale feed items.`);
+
+    if (freshnessError) {
+      console.error(freshnessError.message);
+    }
   }
 
   if (parentPort) parentPort.postMessage("done");
