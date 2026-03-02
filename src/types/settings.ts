@@ -5,9 +5,16 @@ type SingleCWMapping = {
 };
 
 export type Settings = {
-  cw_mapping: SingleCWMapping[];
+  username: string;
+  hashtags: string[];
+  db_table: string;
+  feeds: Record<string, string>;
   feed_hashtags: string[];
   feed_specific_hashtags?: Record<string, string[]>;
+  feed_priorities: Record<string, number>;
+  toot_batch_size: number;
+  min_freshness_hours: number;
+  cw_mapping: SingleCWMapping[];
   auto_reply_text: string;
   similarity_threshold?: number;
   breaking_news_min_sources?: number;
