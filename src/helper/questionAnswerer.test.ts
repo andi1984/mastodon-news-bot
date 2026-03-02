@@ -117,12 +117,72 @@ describe("extractKeywords", () => {
     process.env = originalEnv;
   });
 
-  it("extracts keywords from AI response", async () => {
+  it("extracts keywords from structured AI response", async () => {
+    mockAiResponse(
+      JSON.stringify({
+        keywords: ["Radweg", "Saarbrücken"],
+        variants: ["Saarbrücker"],
+      })
+    );
+
+    const result = await extractKeywords("Was gibt es Neues zum Radweg?");
+
+    expect(result).toEqual(["Radweg", "Saarbrücken", "Saarbrücker"]);
+  });
+
+  it("deduplicates keywords and variants", async () => {
+    mockAiResponse(
+      JSON.stringify({
+        keywords: ["Unfall"],
+        variants: ["Unfall", "Unfälle"],
+      })
+    );
+
+    const result = await extractKeywords("Gab es einen Unfall?");
+
+    expect(result).toEqual(["Unfall", "Unfälle"]);
+  });
+
+  it("still handles plain array format (backwards compat)", async () => {
     mockAiResponse(JSON.stringify(["Radweg", "Saarbrücken"]));
 
     const result = await extractKeywords("Was gibt es Neues zum Radweg?");
 
     expect(result).toEqual(["Radweg", "Saarbrücken"]);
+  });
+
+  it("limits total terms to 15", async () => {
+    mockAiResponse(
+      JSON.stringify({
+        keywords: ["a", "b", "c", "d", "e"],
+        variants: [
+          "f",
+          "g",
+          "h",
+          "i",
+          "j",
+          "k",
+          "l",
+          "m",
+          "n",
+          "o",
+          "p",
+          "q",
+        ],
+      })
+    );
+
+    const result = await extractKeywords("Viele Begriffe");
+
+    expect(result.length).toBeLessThanOrEqual(15);
+  });
+
+  it("returns empty array when structured response has empty keywords", async () => {
+    mockAiResponse(JSON.stringify({ keywords: [], variants: [] }));
+
+    const result = await extractKeywords("Was gibt es Neues?");
+
+    expect(result).toEqual([]);
   });
 
   it("returns empty array when API key is missing", async () => {
@@ -152,7 +212,17 @@ describe("extractKeywords", () => {
     expect(result).toEqual([]);
   });
 
-  it("returns empty array on invalid AI response (not an array)", async () => {
+  it("strips markdown code fences from AI response", async () => {
+    mockAiResponse(
+      '```json\n{"keywords":["Radweg"],"variants":["Radwege"]}\n```'
+    );
+
+    const result = await extractKeywords("Was gibt es Neues zum Radweg?");
+
+    expect(result).toEqual(["Radweg", "Radwege"]);
+  });
+
+  it("returns empty array on invalid AI response (not an array or object)", async () => {
     mockAiResponse('"just a string"');
 
     const result = await extractKeywords("Radweg");
@@ -284,7 +354,9 @@ describe("answerQuestion", () => {
   });
 
   it("returns articles when keywords and results found", async () => {
-    mockAiResponse(JSON.stringify(["Radweg"]));
+    mockAiResponse(
+      JSON.stringify({ keywords: ["Radweg"], variants: ["Radwege"] })
+    );
     mockDb([
       { data: { title: "Neuer Radweg", link: "https://example.com/1" } },
     ]);

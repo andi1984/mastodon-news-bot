@@ -10,10 +10,28 @@ export interface QASettings {
   qa_header_text?: string;
 }
 
-const SYSTEM_PROMPT = `Du bist ein Assistent für eine Nachrichtenbot-Seite im Saarland.
-Der Nutzer stellt eine Frage oder nennt ein Thema. Extrahiere 1-5 Suchbegriffe, die geeignet sind, passende Nachrichtenartikel in einer Datenbank zu finden.
-Antworte ausschließlich mit einem JSON-Array von Strings, z.B. ["Suchbegriff1", "Suchbegriff2"].
-Keine Erklärungen, nur das JSON-Array.`;
+const SYSTEM_PROMPT = `Du bist ein Assistent für einen Nachrichtenbot im Saarland.
+Der Nutzer stellt eine Frage oder nennt ein Thema. Generiere Suchbegriffe für eine SQL-ILIKE-Datenbanksuche (Muster: %Begriff%).
+
+Antworte mit einem JSON-Objekt:
+{
+  "keywords": ["..."],
+  "variants": ["..."]
+}
+
+keywords (1-5): Hauptbegriffe in kürzester sinnvoller Stammform.
+Da ILIKE mit %...% sucht, matcht "%Radweg%" bereits "Radwege", "Radwegen" usw.
+Nutze daher immer die kürzeste Form, die noch eindeutig ist.
+
+variants (0-10): Zusätzliche Formen, die NICHT bereits durch %keyword% als Teilstring abgedeckt sind:
+- Plurale mit Umlaut: "Unfall" wird zu keyword, aber "Unfälle" als variant (ä ist nicht in "Unfall")
+- Plurale mit Stammänderung: "Kind"→"Kinder", "Haus"→"Häuser"
+- Komposita-Teile: "Straßenbau"→"Straße","Bau"
+- Umlaut-Alternativen: "Straße"→"Strasse", "über"→"ueber"
+- Synonyme/Abkürzungen: "Universität"→"Uni", "Kfz"→"Auto"
+- Ableitungen: "Saarbrücken"→"Saarbrücker"
+
+Nur das JSON-Objekt ausgeben. Keine Erklärungen.`;
 
 export function sanitizeHtml(html: string): string {
   let text = html.replace(/<[^>]*>/g, "");
@@ -62,19 +80,41 @@ export async function extractKeywords(text: string): Promise<string[]> {
       response.usage.output_tokens
     );
 
-    const responseText =
+    let responseText =
       response.content[0].type === "text" ? response.content[0].text : "";
+    // Strip markdown code fences if present (e.g. ```json ... ```)
+    responseText = responseText
+      .replace(/^```(?:json)?\s*\n?/i, "")
+      .replace(/\n?```\s*$/i, "")
+      .trim();
     const parsed = JSON.parse(responseText);
 
-    if (
-      !Array.isArray(parsed) ||
-      !parsed.every((k) => typeof k === "string")
-    ) {
-      console.warn("questionAnswerer: invalid AI response format");
-      return [];
+    // Handle structured format: { keywords: [...], variants: [...] }
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const keywords = Array.isArray(parsed.keywords)
+        ? parsed.keywords.filter((k: unknown) => typeof k === "string")
+        : [];
+      const variants = Array.isArray(parsed.variants)
+        ? parsed.variants.filter((v: unknown) => typeof v === "string")
+        : [];
+      const allTerms = [...new Set([...keywords, ...variants])];
+      if (allTerms.length === 0) {
+        console.warn("questionAnswerer: AI returned empty search terms");
+        return [];
+      }
+      return allTerms.slice(0, 15);
     }
 
-    return parsed;
+    // Backwards compatibility: plain array format
+    if (
+      Array.isArray(parsed) &&
+      parsed.every((k) => typeof k === "string")
+    ) {
+      return parsed;
+    }
+
+    console.warn("questionAnswerer: invalid AI response format");
+    return [];
   } catch (err) {
     console.error(`questionAnswerer: keyword extraction failed: ${err}`);
     return [];
