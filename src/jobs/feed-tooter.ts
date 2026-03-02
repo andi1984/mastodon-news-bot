@@ -11,6 +11,7 @@ import {
   ClusterArticle,
 } from "../helper/similarity.js";
 import { formatClusterToot } from "../helper/clusterFormatter.js";
+import { scoreRegionalRelevance } from "../helper/regionalRelevance.js";
 
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
@@ -114,6 +115,18 @@ function sleep(ms: number): Promise<void> {
       return { id: row.id, article, feedKey, pubDate: row.pub_date, score };
     }
   );
+
+  // Apply regional relevance scoring
+  const relevanceMultipliers = await scoreRegionalRelevance(
+    untootedArticles.map((a) => ({
+      title: a.article.title ?? "",
+      feedKey: a.feedKey,
+    })),
+    (settings as any).regional_relevance ?? { enabled: false, always_local_feeds: [], multipliers: { local: 1, regional: 1, national: 1, international: 1 } }
+  );
+  for (let i = 0; i < untootedArticles.length; i++) {
+    untootedArticles[i].score *= relevanceMultipliers.get(i) ?? 1.0;
+  }
 
   // Parse recently-tooted articles
   const recentTootedArticles: ClusterArticle[] = recentTooted.map(

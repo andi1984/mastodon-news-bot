@@ -21,6 +21,7 @@
   "author": "Andreas Sander (mail@andi1984.de)",
   "license": "MIT",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
     "@supabase/supabase-js": "^2.0.3",
     "bree": "^9.1.2",
     "crypto-js": "^4.1.1",
@@ -46,20 +47,29 @@
   "private": true,
   "jest": {
     "transform": {
-      "^.+\\.tsx?$": ["ts-jest", {
-        "tsconfig": {
-          "module": "commonjs",
-          "moduleResolution": "node",
-          "resolveJsonModule": true,
-          "esModuleInterop": true,
-          "types": ["node", "jest"]
-        },
-        "diagnostics": false
-      }]
+      "^.+\\.tsx?$": [
+        "ts-jest",
+        {
+          "tsconfig": {
+            "module": "commonjs",
+            "moduleResolution": "node",
+            "resolveJsonModule": true,
+            "esModuleInterop": true,
+            "types": [
+              "node",
+              "jest"
+            ]
+          },
+          "diagnostics": false
+        }
+      ]
     },
     "moduleNameMapper": {
       "^(\\.{1,2}/.*)\\.js$": "$1"
     },
-    "testPathIgnorePatterns": ["/node_modules/", "/dist/"]
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/dist/"
+    ]
   }
 }

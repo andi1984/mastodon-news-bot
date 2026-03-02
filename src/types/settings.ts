@@ -4,6 +4,17 @@ type SingleCWMapping = {
   words: string[];
 };
 
+export type RegionalRelevanceSettings = {
+  enabled: boolean;
+  always_local_feeds: string[];
+  multipliers: {
+    local: number;
+    regional: number;
+    national: number;
+    international: number;
+  };
+};
+
 export type Settings = {
   username: string;
   hashtags: string[];
@@ -20,4 +31,5 @@ export type Settings = {
   breaking_news_min_sources?: number;
   breaking_news_time_window_hours?: number;
   breaking_news_priority_boost?: number;
+  regional_relevance?: RegionalRelevanceSettings;
 };

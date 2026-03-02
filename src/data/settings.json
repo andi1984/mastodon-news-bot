@@ -40,6 +40,11 @@
   "breaking_news_time_window_hours": 2,
   "breaking_news_priority_boost": 2.0,
   "auto_reply_text": "Dieser Toot wurde automatisch von einem Bot erstellt. Leider kann ich auf Antworten nicht eingehen. Bei Fragen wende dich bitte direkt an die jeweilige Nachrichtenquelle.",
+  "regional_relevance": {
+    "enabled": true,
+    "always_local_feeds": ["saarnews", "breaking-news", "polizei", "fahrrad", "dudplaner", "mfw-events", "mfw-pressemitteilungen"],
+    "multipliers": { "local": 1.5, "regional": 1.2, "national": 1.0, "international": 0.6 }
+  },
   "cw_mapping": [
     {
       "label": "Gewalt",
