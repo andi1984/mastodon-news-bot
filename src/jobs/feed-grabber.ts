@@ -26,7 +26,7 @@ const supabase = createClient();
       const pubDate = isNaN(parsed.getTime()) ? new Date() : parsed;
       return {
         hash: `${tableId}-${CryptoJS.SHA256(item.title)}-${CryptoJS.SHA256(item.link)}`,
-        data: JSON.stringify({ ...item, _feedKey: feedKey }),
+        data: { ...item, _feedKey: feedKey },
         pub_date: pubDate.toISOString(),
       };
     });

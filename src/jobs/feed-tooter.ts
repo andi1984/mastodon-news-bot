@@ -108,9 +108,9 @@ function sleep(ms: number): Promise<void> {
 
   // Parse all untooted articles into ClusterArticle format
   const untootedArticles: ClusterArticle[] = feeds.map(
-    (row: { id: string; data: string; pub_date: string }) => {
-      const article: FeedItem = JSON.parse(row.data);
-      const feedKey = (article as any)._feedKey as string | undefined;
+    (row: { id: string; data: FeedItem & { _feedKey?: string }; pub_date: string }) => {
+      const article: FeedItem = row.data;
+      const feedKey = row.data._feedKey as string | undefined;
       const score = scoreFeedItem(feedKey, row.pub_date);
       return { id: row.id, article, feedKey, pubDate: row.pub_date, score };
     }
@@ -130,9 +130,9 @@ function sleep(ms: number): Promise<void> {
 
   // Parse recently-tooted articles
   const recentTootedArticles: ClusterArticle[] = recentTooted.map(
-    (row: { id: string; data: string; pub_date: string }) => {
-      const article: FeedItem = JSON.parse(row.data);
-      const feedKey = (article as any)._feedKey as string | undefined;
+    (row: { id: string; data: FeedItem & { _feedKey?: string }; pub_date: string }) => {
+      const article: FeedItem = row.data;
+      const feedKey = row.data._feedKey as string | undefined;
       return {
         id: row.id,
         article,

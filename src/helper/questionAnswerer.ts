@@ -11,25 +11,18 @@ export interface QASettings {
 }
 
 const SYSTEM_PROMPT = `Du bist ein Assistent für einen Nachrichtenbot im Saarland.
-Der Nutzer stellt eine Frage oder nennt ein Thema. Generiere Suchbegriffe für eine SQL-ILIKE-Datenbanksuche (Muster: %Begriff%).
+Der Nutzer stellt eine Frage oder nennt ein Thema. Generiere Suchbegriffe für eine PostgreSQL-Volltextsuche (to_tsquery mit der Konfiguration 'german').
 
 Antworte mit einem JSON-Objekt:
 {
-  "keywords": ["..."],
-  "variants": ["..."]
+  "keywords": ["..."]
 }
 
-keywords (1-5): Hauptbegriffe in kürzester sinnvoller Stammform.
-Da ILIKE mit %...% sucht, matcht "%Radweg%" bereits "Radwege", "Radwegen" usw.
-Nutze daher immer die kürzeste Form, die noch eindeutig ist.
-
-variants (0-10): Zusätzliche Formen, die NICHT bereits durch %keyword% als Teilstring abgedeckt sind:
-- Plurale mit Umlaut: "Unfall" wird zu keyword, aber "Unfälle" als variant (ä ist nicht in "Unfall")
-- Plurale mit Stammänderung: "Kind"→"Kinder", "Haus"→"Häuser"
-- Komposita-Teile: "Straßenbau"→"Straße","Bau"
-- Umlaut-Alternativen: "Straße"→"Strasse", "über"→"ueber"
-- Synonyme/Abkürzungen: "Universität"→"Uni", "Kfz"→"Auto"
-- Ableitungen: "Saarbrücken"→"Saarbrücker"
+keywords (1-7): Suchbegriffe als einzelne Wörter.
+Die Volltextsuche nutzt deutsches Stemming, d.h. "Unfall" matcht automatisch "Unfälle", "Verkehrsunfall" usw.
+Du musst daher KEINE Varianten oder Stammformen angeben – ein Wort genügt.
+Verwende die natürliche Form des Wortes (z.B. "Unfall", nicht "Unf").
+Bei Komposita gib sowohl das Kompositum als auch die Teile an: "Straßenbau", "Straße", "Bau".
 
 Nur das JSON-Objekt ausgeben. Keine Erklärungen.`;
 
@@ -46,11 +39,12 @@ export function sanitizeHtml(html: string): string {
   return text.trim();
 }
 
-function escapeIlike(keyword: string): string {
-  return keyword
-    .replace(/\\/g, "\\\\")
-    .replace(/%/g, "\\%")
-    .replace(/_/g, "\\_");
+function buildTsQuery(keywords: string[]): string {
+  return keywords
+    .map((kw) => kw.replace(/[^a-zA-ZäöüÄÖÜßéèêàáâ0-9]/g, ""))
+    .filter((kw) => kw.length > 0)
+    .map((kw) => `'${kw}'`)
+    .join(" | ");
 }
 
 export async function extractKeywords(text: string): Promise<string[]> {
@@ -89,11 +83,12 @@ export async function extractKeywords(text: string): Promise<string[]> {
       .trim();
     const parsed = JSON.parse(responseText);
 
-    // Handle structured format: { keywords: [...], variants: [...] }
+    // Handle structured format: { keywords: [...] }
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       const keywords = Array.isArray(parsed.keywords)
         ? parsed.keywords.filter((k: unknown) => typeof k === "string")
         : [];
+      // Also support legacy variants field for backwards compatibility
       const variants = Array.isArray(parsed.variants)
         ? parsed.variants.filter((v: unknown) => typeof v === "string")
         : [];
@@ -130,18 +125,15 @@ export async function searchArticles(
 
   const supabase = createClient();
 
-  const filters = keywords.flatMap((kw) => {
-    const escaped = escapeIlike(kw);
-    return [
-      `data->>title.ilike.%${escaped}%`,
-      `data->>content.ilike.%${escaped}%`,
-    ];
-  });
+  const tsQuery = buildTsQuery(keywords);
+  if (!tsQuery) {
+    return [];
+  }
 
   const { data, error } = await supabase
     .from(dbTable)
     .select("data")
-    .or(filters.join(","))
+    .textSearch("fts", tsQuery, { config: "german" })
     .order("pub_date", { ascending: false })
     .limit(maxResults);
 
