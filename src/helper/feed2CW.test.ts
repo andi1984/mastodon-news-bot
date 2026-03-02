@@ -2,7 +2,14 @@ import { Settings } from "../types/settings.js";
 import feed2CW from "./feed2CW.js";
 
 const settings: Settings = {
+  username: "",
+  hashtags: [],
+  db_table: "",
+  feeds: {},
   feed_hashtags: [],
+  feed_priorities: {},
+  toot_batch_size: 1,
+  min_freshness_hours: 24,
   cw_mapping: [
     {
       id: "foo",
