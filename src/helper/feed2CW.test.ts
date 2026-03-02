@@ -22,7 +22,6 @@ const settings: Settings = {
       words: ["Bertram", "Susi"],
     },
   ],
-  auto_reply_text: "",
 };
 
 describe("feed2CW", () => {

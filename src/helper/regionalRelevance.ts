@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { RegionalRelevanceSettings } from "../types/settings.js";
+import { hasAiBudget, logAiUsage } from "./costTracker.js";
 
 type RelevanceCategory = "local" | "regional" | "national" | "international";
 
@@ -71,6 +72,16 @@ export async function scoreRegionalRelevance(
   }
 
   try {
+    if (!(await hasAiBudget())) {
+      console.warn(
+        "Regional relevance: daily AI budget exceeded, using neutral multipliers"
+      );
+      for (const item of toClassify) {
+        result.set(item.index, 1.0);
+      }
+      return result;
+    }
+
     const client = new Anthropic({ apiKey });
     const response = await client.messages.create({
       model: "claude-haiku-4-5-20251001",
@@ -78,6 +89,12 @@ export async function scoreRegionalRelevance(
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: buildUserPrompt(toClassify) }],
     });
+
+    logAiUsage(
+      "regional_relevance",
+      response.usage.input_tokens,
+      response.usage.output_tokens
+    );
 
     const text =
       response.content[0].type === "text" ? response.content[0].text : "";

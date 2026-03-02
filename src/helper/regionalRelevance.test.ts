@@ -5,7 +5,14 @@ jest.mock("@anthropic-ai/sdk", () => {
   };
 });
 
+jest.mock("./costTracker", () => ({
+  __esModule: true,
+  hasAiBudget: jest.fn().mockResolvedValue(true),
+  logAiUsage: jest.fn().mockResolvedValue(undefined),
+}));
+
 import Anthropic from "@anthropic-ai/sdk";
+import { hasAiBudget } from "./costTracker.js";
 import { scoreRegionalRelevance } from "./regionalRelevance.js";
 import { RegionalRelevanceSettings } from "../types/settings.js";
 
@@ -37,6 +44,7 @@ function mockApiResponse(text: string) {
         messages: {
           create: jest.fn().mockResolvedValue({
             content: [{ type: "text", text }],
+            usage: { input_tokens: 200, output_tokens: 80 },
           }),
         },
       }) as any
@@ -132,6 +140,19 @@ describe("scoreRegionalRelevance", () => {
 
     expect(result.get(0)).toBe(1.0);
     expect(result.get(1)).toBe(1.0);
+    expect(MockedAnthropic).not.toHaveBeenCalled();
+  });
+
+  it("returns neutral multipliers when AI budget is exceeded", async () => {
+    (hasAiBudget as jest.Mock).mockResolvedValueOnce(false);
+
+    const articles = [
+      { title: "Bundestagswahl", feedKey: "tagesschau" },
+    ];
+
+    const result = await scoreRegionalRelevance(articles, defaultConfig);
+
+    expect(result.get(0)).toBe(1.0);
     expect(MockedAnthropic).not.toHaveBeenCalled();
   });
 

@@ -37,6 +37,8 @@ const bree = new Bree({
     { name: "daily-digest", path: path.join(jobsRoot, `daily-digest.${ext}`), cron: "0 22 * * *" },
     // Weekly digest every Sunday at 20:00
     { name: "weekly-digest", path: path.join(jobsRoot, `weekly-digest.${ext}`), cron: "0 20 * * 0" },
+    // Mention replier — check and respond to mentions every 5 minutes
+    { name: "mention-replier", path: path.join(jobsRoot, `mention-replier.${ext}`), interval: "5m" },
   ],
 });
 

@@ -26,10 +26,14 @@ export type Settings = {
   toot_batch_size: number;
   min_freshness_hours: number;
   cw_mapping: SingleCWMapping[];
-  auto_reply_text: string;
   similarity_threshold?: number;
   breaking_news_min_sources?: number;
   breaking_news_time_window_hours?: number;
   breaking_news_priority_boost?: number;
   regional_relevance?: RegionalRelevanceSettings;
+  qa_enabled?: boolean;
+  qa_max_results?: number;
+  qa_min_text_length?: number;
+  qa_no_results_text?: string;
+  qa_header_text?: string;
 };
