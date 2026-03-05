@@ -67,10 +67,14 @@ export function storySimilarity(
   titleA: string,
   titleB: string,
   dateA: Date,
-  dateB: Date
+  dateB: Date,
+  contentA?: string,
+  contentB?: string
 ): number {
-  const tokensA = tokenize(titleA);
-  const tokensB = tokenize(titleB);
+  const textA = contentA ? `${titleA} ${contentA}` : titleA;
+  const textB = contentB ? `${titleB} ${contentB}` : titleB;
+  const tokensA = tokenize(textA);
+  const tokensB = tokenize(textB);
   const jaccard = jaccardSimilarity(tokensA, tokensB);
   const timeSim = timeProximityScore(dateA, dateB);
   return 0.7 * jaccard + 0.3 * timeSim;
@@ -119,8 +123,12 @@ export function clusterArticles(
       const dateB = articles[j].pubDate
         ? new Date(articles[j].pubDate!)
         : new Date();
+      // Include up to 500 chars of the article description to catch same-story
+      // articles whose headlines are phrased very differently across sources.
+      const descA = (articles[i].article.contentSnippet ?? "").slice(0, 500);
+      const descB = (articles[j].article.contentSnippet ?? "").slice(0, 500);
 
-      const sim = storySimilarity(titleA, titleB, dateA, dateB);
+      const sim = storySimilarity(titleA, titleB, dateA, dateB, descA, descB);
       if (sim >= threshold) {
         union(i, j);
       }
