@@ -10,7 +10,11 @@ import {
 } from "./similarity.js";
 
 function makeArticle(
-  overrides: Partial<ClusterArticle> & { title?: string; feedKey?: string }
+  overrides: Partial<ClusterArticle> & {
+    title?: string;
+    feedKey?: string;
+    contentSnippet?: string;
+  }
 ): ClusterArticle {
   return {
     id: overrides.id ?? Math.random().toString(36).slice(2),
@@ -18,6 +22,7 @@ function makeArticle(
       title: overrides.title ?? "Test Article",
       link: `https://example.com/${overrides.id ?? "test"}`,
       "dc:creator": "",
+      contentSnippet: overrides.contentSnippet,
       ...(overrides.article as any),
     },
     feedKey: overrides.feedKey ?? "feed-a",
@@ -148,6 +153,20 @@ describe("storySimilarity — same story detection", () => {
     // Identical titles but 24h apart → jaccard=1.0, time=0.0 → 0.7
     expect(sim).toBeCloseTo(0.7, 5);
   });
+
+  it("uses description to detect same story when titles share few tokens", () => {
+    // Simulate two sources covering the same road accident with very different headlines.
+    // Title overlap is minimal, but descriptions overlap substantially.
+    const sim = storySimilarity(
+      "Unfall auf der A6",
+      "Sperrung wegen Verkehrsgeschehen",
+      now,
+      oneHourLater,
+      "Schwerer Unfall auf der Autobahn A6 bei Saarbrücken führt zu Vollsperrung. Zwei Fahrzeuge kollidierten.",
+      "Die A6 bei Saarbrücken ist nach einem schweren Unfall vollgesperrt. Zwei Autos kollidierten auf der Autobahn."
+    );
+    expect(sim).toBeGreaterThanOrEqual(0.4);
+  });
 });
 
 describe("clusterArticles", () => {
@@ -251,6 +270,36 @@ describe("clusterArticles", () => {
     for (const [, cluster] of clusters) {
       expect(cluster.length).toBe(1);
     }
+  });
+
+  it("clusters articles from different feeds with differing titles but similar descriptions", () => {
+    // Regression: two sources covered the same road accident but with headlines
+    // that share almost no tokens. Without description-based similarity they would
+    // end up in separate clusters and both get posted.
+    const now = new Date("2024-06-15T10:00:00Z");
+    const articles: ClusterArticle[] = [
+      makeArticle({
+        id: "1",
+        title: "Unfall auf der A6",
+        feedKey: "feed-a",
+        pubDate: now.toISOString(),
+        contentSnippet:
+          "Schwerer Unfall auf der Autobahn A6 bei Saarbrücken führt zu Vollsperrung. Zwei Fahrzeuge kollidierten.",
+      }),
+      makeArticle({
+        id: "2",
+        title: "Sperrung wegen Verkehrsgeschehen",
+        feedKey: "feed-b",
+        pubDate: new Date(now.getTime() + 20 * 60000).toISOString(),
+        contentSnippet:
+          "Die A6 bei Saarbrücken ist nach einem schweren Unfall vollgesperrt. Zwei Autos kollidierten auf der Autobahn.",
+      }),
+    ];
+
+    const clusters = clusterArticles(articles, 0.4);
+    expect(clusters.size).toBe(1);
+    const allArticles = Array.from(clusters.values())[0]!;
+    expect(allArticles.length).toBe(2);
   });
 
   it("returns a single-article cluster for a single input", () => {
