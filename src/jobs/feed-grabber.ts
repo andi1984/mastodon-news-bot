@@ -15,7 +15,11 @@ const supabase = createClient();
 // Iterate over all feeds
 (async () => {
   await asyncForEach(Object.entries(settings.feeds) as [string, string][], async ([feedKey, feedURL]: [string, string]) => {
-    const rssData: { items: any[] } = await getFeed(feedURL);
+    const rssData = await getFeed(feedURL);
+
+    if (!rssData) {
+      return false;
+    }
 
     // 1. Hash feedURL to get a unique id for the table
     const tableId = CryptoJS.SHA256(feedURL);
