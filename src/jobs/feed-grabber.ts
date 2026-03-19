@@ -11,11 +11,11 @@ import {
   ArticleForMatching,
 } from "../helper/storyMatcher.js";
 
-// Single supabase client (singleton)
+// Single supabase client (singleton) with retry/timeout built in
 const supabase = createClient();
 
-// Process feeds in parallel batches for better performance
-const BATCH_SIZE = 5;
+// Process feeds in parallel batches - increased for faster processing
+const BATCH_SIZE = 8;
 
 async function processFeedBatch(
   feedEntries: [string, string][]
