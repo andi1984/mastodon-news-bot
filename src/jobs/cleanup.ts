@@ -43,6 +43,39 @@ const supabase = createClient();
     }
   }
 
+  // Clean up old stories (keep for 7 days after tooting, 3 days if not tooted)
+  const tootedStoryCutoff = new Date();
+  tootedStoryCutoff.setDate(tootedStoryCutoff.getDate() - 7);
+
+  const { data: oldTootedStories, error: storyError1 } = await supabase
+    .from("stories")
+    .delete()
+    .eq("tooted", true)
+    .lt("updated_at", tootedStoryCutoff.toISOString())
+    .select("id");
+
+  if (storyError1) {
+    console.error(`Failed to clean up old tooted stories: ${storyError1.message}`);
+  } else {
+    console.log(`Cleaned up ${oldTootedStories?.length ?? 0} old tooted stories.`);
+  }
+
+  const untootedStoryCutoff = new Date();
+  untootedStoryCutoff.setDate(untootedStoryCutoff.getDate() - 3);
+
+  const { data: oldUntootedStories, error: storyError2 } = await supabase
+    .from("stories")
+    .delete()
+    .eq("tooted", false)
+    .lt("updated_at", untootedStoryCutoff.toISOString())
+    .select("id");
+
+  if (storyError2) {
+    console.error(`Failed to clean up old untooted stories: ${storyError2.message}`);
+  } else {
+    console.log(`Cleaned up ${oldUntootedStories?.length ?? 0} old untooted stories.`);
+  }
+
   if (parentPort) parentPort.postMessage("done");
   else process.exit(0);
 })();

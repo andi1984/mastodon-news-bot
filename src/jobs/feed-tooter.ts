@@ -5,13 +5,13 @@ import rssFeedItem2Toot, { FeedItem } from "../helper/rssFeedItem2Toot.js";
 import feed2CW from "../helper/feed2CW.js";
 import fetchImage from "../helper/fetchImage.js";
 import {
-  clusterArticles,
   pickPrimaryArticle,
   isBreakingNews,
   ClusterArticle,
 } from "../helper/similarity.js";
 import { formatClusterToot } from "../helper/clusterFormatter.js";
 import { scoreRegionalRelevance } from "../helper/regionalRelevance.js";
+import { markStoryTooted, getStoryTootId } from "../helper/storyMatcher.js";
 
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
@@ -21,13 +21,14 @@ const BATCH_SIZE = (settings as any).toot_batch_size ?? 3;
 const FEED_PRIORITIES: Record<string, number> =
   (settings as any).feed_priorities ?? {};
 const MIN_FRESHNESS_HOURS = settings.min_freshness_hours || 24;
-const SIMILARITY_THRESHOLD = (settings as any).similarity_threshold ?? 0.4;
 const BREAKING_NEWS_MIN_SOURCES =
   (settings as any).breaking_news_min_sources ?? 3;
 const BREAKING_NEWS_TIME_WINDOW =
   (settings as any).breaking_news_time_window_hours ?? 2;
 const BREAKING_NEWS_BOOST =
   (settings as any).breaking_news_priority_boost ?? 2.0;
+const STORY_THREADING_ENABLED =
+  (settings as any).story_threading_enabled ?? true;
 
 function scoreFeedItem(
   feedKey: string | undefined,
@@ -48,16 +49,60 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Format a thread reply for a story follow-up.
+ */
+function formatThreadReply(articles: ClusterArticle[]): string {
+  const primary = pickPrimaryArticle(articles, FEED_PRIORITIES);
+  const title = primary.article.title || "";
+  const link = primary.article.link || "";
+  const feedName = primary.feedKey || "unbekannt";
+
+  const sourceCount = new Set(articles.map((a) => a.feedKey)).size;
+  const prefix =
+    sourceCount > 1 ? `Update (${sourceCount} Quellen): ` : "Update: ";
+
+  let toot = `${prefix}${title}\n\n${feedName}: ${link}`;
+
+  // Add other sources if multiple
+  if (sourceCount > 1) {
+    const otherSources = articles
+      .filter((a) => a.id !== primary.id && a.feedKey !== primary.feedKey)
+      .slice(0, 2); // Limit to 2 additional sources
+    for (const src of otherSources) {
+      const srcLine = `\n${src.feedKey || "unbekannt"}: ${src.article.link || ""}`;
+      if (toot.length + srcLine.length <= 500) {
+        toot += srcLine;
+      }
+    }
+  }
+
+  return toot;
+}
+
+type ArticleRow = {
+  id: string;
+  data: FeedItem & { _feedKey?: string };
+  pub_date: string;
+  story_id: string | null;
+};
+
+type StoryInfo = {
+  id: string;
+  tooted: boolean;
+  toot_id: string | null;
+};
+
 (async () => {
   const db = createClient();
 
-  // 1. Fetch untooted articles (increased limit for better clustering)
+  // 1. Fetch untooted articles with story_id
   let untootedQuery = db
     .from(settings.db_table)
-    .select("id,data,pub_date")
+    .select("id,data,pub_date,story_id")
     .is("tooted", false)
     .order("pub_date", { ascending: false })
-    .limit(50);
+    .limit(100);
 
   if (settings.min_freshness_hours) {
     const minFreshnessDate = new Date();
@@ -74,30 +119,14 @@ function sleep(ms: number): Promise<void> {
     );
   }
 
-  // 2. Fetch recently-tooted articles from last 2h for suppression
-  const recentCutoff = new Date();
-  recentCutoff.setHours(recentCutoff.getHours() - BREAKING_NEWS_TIME_WINDOW);
-
-  const recentTootedQuery = db
-    .from(settings.db_table)
-    .select("id,data,pub_date")
-    .is("tooted", true)
-    .filter("pub_date", "gt", recentCutoff.toISOString())
-    .order("pub_date", { ascending: false })
-    .limit(50);
-
-  const [untootedResult, recentTootedResult] = await Promise.all([
-    untootedQuery,
-    recentTootedQuery,
-  ]);
+  const untootedResult = await untootedQuery;
 
   if (untootedResult.error) {
     console.log(untootedResult.error.message);
     throw untootedResult.error;
   }
 
-  const feeds = untootedResult.data;
-  const recentTooted = recentTootedResult.data || [];
+  const feeds = untootedResult.data as ArticleRow[];
 
   if (!feeds || feeds.length === 0) {
     console.log("ALARM: Kein Feed-Inhalt mehr da zum tooten!");
@@ -106,136 +135,185 @@ function sleep(ms: number): Promise<void> {
     return;
   }
 
-  // Parse all untooted articles into ClusterArticle format
-  const untootedArticles: ClusterArticle[] = feeds.map(
-    (row: { id: string; data: FeedItem & { _feedKey?: string }; pub_date: string }) => {
-      const article: FeedItem = row.data;
-      const feedKey = row.data._feedKey as string | undefined;
-      const score = scoreFeedItem(feedKey, row.pub_date);
-      return { id: row.id, article, feedKey, pubDate: row.pub_date, score };
-    }
-  );
+  // 2. Get story info for all story IDs (including toot_id for threading)
+  const storyIds = [
+    ...new Set(feeds.filter((f) => f.story_id).map((f) => f.story_id!)),
+  ];
 
-  // Apply regional relevance scoring
-  const relevanceMultipliers = await scoreRegionalRelevance(
-    untootedArticles.map((a) => ({
-      title: a.article.title ?? "",
-      feedKey: a.feedKey,
-    })),
-    (settings as any).regional_relevance ?? { enabled: false, always_local_feeds: [], multipliers: { local: 1, regional: 1, national: 1, international: 1 } }
-  );
-  for (let i = 0; i < untootedArticles.length; i++) {
-    untootedArticles[i].score *= relevanceMultipliers.get(i) ?? 1.0;
+  const storyInfoMap = new Map<string, StoryInfo>();
+  if (storyIds.length > 0) {
+    const { data: stories } = await db
+      .from("stories")
+      .select("id, tooted, toot_id")
+      .in("id", storyIds);
+
+    if (stories) {
+      for (const s of stories as StoryInfo[]) {
+        storyInfoMap.set(s.id, s);
+      }
+    }
   }
 
-  // Parse recently-tooted articles
-  const recentTootedArticles: ClusterArticle[] = recentTooted.map(
-    (row: { id: string; data: FeedItem & { _feedKey?: string }; pub_date: string }) => {
-      const article: FeedItem = row.data;
-      const feedKey = row.data._feedKey as string | undefined;
-      return {
-        id: row.id,
-        article,
-        feedKey,
-        pubDate: row.pub_date,
-        score: 0,
-      };
-    }
-  );
+  // 3. Separate articles into: new stories, follow-ups (threading), orphans
+  const newStoryArticles: ArticleRow[] = [];
+  const followUpGroups = new Map<string, ArticleRow[]>(); // story_id -> articles for threading
+  const orphanArticles: ArticleRow[] = [];
 
-  // 3. Cluster all articles together (untooted + recently tooted for suppression)
-  const allArticles = [...untootedArticles, ...recentTootedArticles];
-  const clusters = clusterArticles(allArticles, SIMILARITY_THRESHOLD);
-
-  // Track which untooted IDs to suppress (matched with already-tooted articles)
-  const tootedIds = new Set(recentTootedArticles.map((a) => a.id));
-  const suppressIds = new Set<string>();
-
-  // Separate clusters into postable vs suppressed
-  type ScoredCluster = {
-    articles: ClusterArticle[];
-    clusterScore: number;
-    isBreaking: boolean;
-  };
-  const postableClusters: ScoredCluster[] = [];
-
-  for (const [, cluster] of clusters) {
-    const hasTooted = cluster.some((a) => tootedIds.has(a.id));
-    const untootedInCluster = cluster.filter((a) => !tootedIds.has(a.id));
-
-    if (hasTooted) {
-      // Suppress all untooted articles that match an already-tooted story
-      for (const a of untootedInCluster) {
-        suppressIds.add(a.id);
-      }
+  for (const article of feeds) {
+    if (!article.story_id) {
+      orphanArticles.push(article);
       continue;
     }
 
-    if (untootedInCluster.length === 0) continue;
+    const storyInfo = storyInfoMap.get(article.story_id);
+    if (!storyInfo) {
+      // Story not found - treat as orphan
+      orphanArticles.push(article);
+      continue;
+    }
 
-    // 4. Score the cluster
-    const bestScore = Math.max(...untootedInCluster.map((a) => a.score));
-    const sourceBoost = 1 + (untootedInCluster.length - 1) * 0.15;
+    if (storyInfo.tooted && storyInfo.toot_id && STORY_THREADING_ENABLED) {
+      // Story already posted - this is a follow-up for threading
+      if (!followUpGroups.has(article.story_id)) {
+        followUpGroups.set(article.story_id, []);
+      }
+      followUpGroups.get(article.story_id)!.push(article);
+    } else if (storyInfo.tooted) {
+      // Story tooted but threading disabled - suppress
+      const { error } = await db
+        .from(settings.db_table)
+        .update({ tooted: true })
+        .eq("id", article.id);
+      if (error) {
+        console.error(`Failed to suppress article ${article.id}: ${error.message}`);
+      }
+    } else {
+      // Story not yet posted - queue for posting
+      newStoryArticles.push(article);
+    }
+  }
+
+  console.log(
+    `Articles: ${newStoryArticles.length} new, ${followUpGroups.size} follow-up threads, ${orphanArticles.length} orphans`
+  );
+
+  // 4. Group new story articles by story_id
+  const storyGroups = new Map<string, ClusterArticle[]>();
+
+  for (const row of newStoryArticles) {
+    const article: FeedItem = row.data;
+    const feedKey = row.data._feedKey as string | undefined;
+    const score = scoreFeedItem(feedKey, row.pub_date);
+    const clusterArticle: ClusterArticle = {
+      id: row.id,
+      article,
+      feedKey,
+      pubDate: row.pub_date,
+      score,
+    };
+
+    if (row.story_id) {
+      if (!storyGroups.has(row.story_id)) {
+        storyGroups.set(row.story_id, []);
+      }
+      storyGroups.get(row.story_id)!.push(clusterArticle);
+    }
+  }
+
+  // Convert orphans to ClusterArticle format
+  const orphanClusters: ClusterArticle[] = orphanArticles.map((row) => ({
+    id: row.id,
+    article: row.data,
+    feedKey: row.data._feedKey,
+    pubDate: row.pub_date,
+    score: scoreFeedItem(row.data._feedKey, row.pub_date),
+  }));
+
+  // 5. Apply regional relevance scoring
+  const allArticlesForScoring = [
+    ...Array.from(storyGroups.values()).flat(),
+    ...orphanClusters,
+  ];
+
+  if (allArticlesForScoring.length > 0) {
+    const relevanceMultipliers = await scoreRegionalRelevance(
+      allArticlesForScoring.map((a) => ({
+        title: a.article.title ?? "",
+        feedKey: a.feedKey,
+      })),
+      (settings as any).regional_relevance ?? {
+        enabled: false,
+        always_local_feeds: [],
+        multipliers: { local: 1, regional: 1, national: 1, international: 1 },
+      }
+    );
+
+    for (let i = 0; i < allArticlesForScoring.length; i++) {
+      allArticlesForScoring[i].score *= relevanceMultipliers.get(i) ?? 1.0;
+    }
+  }
+
+  // 6. Score stories and create postable list
+  type ScoredStory = {
+    storyId: string | null;
+    articles: ClusterArticle[];
+    storyScore: number;
+    isBreaking: boolean;
+  };
+  const postableStories: ScoredStory[] = [];
+
+  for (const [storyId, articles] of storyGroups) {
+    const bestScore = Math.max(...articles.map((a) => a.score));
+    const sourceBoost = 1 + (articles.length - 1) * 0.15;
     const breaking = isBreakingNews(
-      untootedInCluster,
+      articles,
       BREAKING_NEWS_TIME_WINDOW,
       BREAKING_NEWS_MIN_SOURCES
     );
     const breakingBoost = breaking ? BREAKING_NEWS_BOOST : 1.0;
-    const clusterScore = bestScore * sourceBoost * breakingBoost;
+    const storyScore = bestScore * sourceBoost * breakingBoost;
 
-    postableClusters.push({
-      articles: untootedInCluster,
-      clusterScore,
+    postableStories.push({
+      storyId,
+      articles,
+      storyScore,
       isBreaking: breaking,
     });
   }
 
-  // Mark suppressed articles as tooted
-  if (suppressIds.size > 0) {
-    const ids = Array.from(suppressIds);
-    console.log(
-      `Suppressing ${ids.length} articles that match already-tooted stories`
-    );
-    const { error: suppressError } = await db
-      .from(settings.db_table)
-      .update({ tooted: true })
-      .in("id", ids);
-
-    if (suppressError) {
-      console.error(`Failed to suppress articles: ${suppressError.message}`);
-    }
+  // Process orphan articles as individual stories
+  for (const article of orphanClusters) {
+    postableStories.push({
+      storyId: null,
+      articles: [article],
+      storyScore: article.score,
+      isBreaking: false,
+    });
   }
 
-  // 5. Sort clusters by score, pick top BATCH_SIZE
-  postableClusters.sort((a, b) => b.clusterScore - a.clusterScore);
-  const batch = postableClusters.slice(0, BATCH_SIZE);
+  // 7. Sort by score, pick top BATCH_SIZE
+  postableStories.sort((a, b) => b.storyScore - a.storyScore);
+  const batch = postableStories.slice(0, BATCH_SIZE);
 
   console.log(
-    `Clustering: ${untootedArticles.length} untooted articles → ${postableClusters.length} clusters, posting top ${batch.length}`
+    `Stories: ${storyGroups.size} grouped + ${orphanClusters.length} orphans → posting top ${batch.length}`
   );
-  for (const c of batch) {
-    const primary = pickPrimaryArticle(c.articles, FEED_PRIORITIES);
+  for (const story of batch) {
+    const primary = pickPrimaryArticle(story.articles, FEED_PRIORITIES);
+    const sourceCount = new Set(story.articles.map((a) => a.feedKey)).size;
     console.log(
-      `  cluster: ${c.articles.length} articles, score=${c.clusterScore.toFixed(3)}, breaking=${c.isBreaking}, primary=${primary.feedKey ?? "unknown"}`
+      `  story: ${story.articles.length} articles from ${sourceCount} sources, score=${story.storyScore.toFixed(3)}, breaking=${story.isBreaking}, primary=${primary.feedKey ?? "unknown"}`
     );
-  }
-
-  if (batch.length === 0) {
-    console.log("No clusters to post.");
-    if (parentPort) parentPort.postMessage("done");
-    else process.exit(0);
-    return;
   }
 
   const mastoClient = await getInstance();
 
-  // 6. Post each cluster
-  for (const cluster of batch) {
+  // 8. Post new stories
+  for (const story of batch) {
     try {
-      const primary = pickPrimaryArticle(cluster.articles, FEED_PRIORITIES);
+      const primary = pickPrimaryArticle(story.articles, FEED_PRIORITIES);
 
-      const tootText = formatClusterToot(cluster.articles, {
+      const tootText = formatClusterToot(story.articles, {
         feedPriorities: FEED_PRIORITIES,
         feedHashtags: settings.feed_hashtags,
         feedSpecificHashtags: (settings as any).feed_specific_hashtags,
@@ -243,7 +321,7 @@ function sleep(ms: number): Promise<void> {
         breakingNewsTimeWindowHours: BREAKING_NEWS_TIME_WINDOW,
       });
 
-      // Try to fetch and upload an image from the primary article
+      // Try to fetch and upload an image
       let mediaIds: string[] | undefined;
       const enclosure = (primary.article as any).enclosure;
       if (enclosure?.url) {
@@ -258,13 +336,11 @@ function sleep(ms: number): Promise<void> {
             console.log(`Image attached: ${enclosure.url}`);
           }
         } catch (imgErr) {
-          console.error(
-            `Image upload failed, tooting without image: ${imgErr}`
-          );
+          console.error(`Image upload failed: ${imgErr}`);
         }
       }
 
-      await mastoClient.v1.statuses.create({
+      const tootResult = await mastoClient.v1.statuses.create({
         status: tootText,
         spoilerText: feed2CW(tootText, settings),
         visibility: "public",
@@ -272,30 +348,88 @@ function sleep(ms: number): Promise<void> {
         ...(mediaIds ? { mediaIds } : {}),
       });
 
-      // 7. Mark ALL articles in the cluster as tooted
-      const clusterIds = cluster.articles.map((a) => a.id);
+      // Mark story as tooted
+      if (story.storyId) {
+        await markStoryTooted(story.storyId, tootResult.id);
+      }
+
+      // Mark articles as tooted
+      const articleIds = story.articles.map((a) => a.id);
       const { error: errorOnUpdate } = await db
         .from(settings.db_table)
         .update({ tooted: true })
-        .in("id", clusterIds);
+        .in("id", articleIds);
 
       if (errorOnUpdate) {
-        console.error(
-          `Failed to mark cluster articles as tooted: ${errorOnUpdate.message}`
-        );
+        console.error(`Failed to mark articles as tooted: ${errorOnUpdate.message}`);
       } else {
+        const sourceCount = new Set(story.articles.map((a) => a.feedKey)).size;
         console.log(
-          `Tooted cluster: ${clusterIds.length} articles [${clusterIds.join(", ")}] (primary=${primary.feedKey}${cluster.isBreaking ? ", BREAKING" : ""})`
+          `Tooted story: ${articleIds.length} articles from ${sourceCount} sources (primary=${primary.feedKey}${story.isBreaking ? ", BREAKING" : ""})`
         );
       }
 
-      // Delay between toots to avoid rate-limiting
-      if (cluster !== batch[batch.length - 1]) {
-        await sleep(5000);
-      }
+      await sleep(5000);
     } catch (e) {
-      console.error(`Failed to toot cluster: ${e}`);
+      console.error(`Failed to toot story: ${e}`);
     }
+  }
+
+  // 9. Post follow-up threads (limited to 2 per run to avoid spam)
+  let threadCount = 0;
+  const MAX_THREADS_PER_RUN = 2;
+
+  for (const [storyId, articleRows] of followUpGroups) {
+    if (threadCount >= MAX_THREADS_PER_RUN) break;
+
+    try {
+      const storyInfo = storyInfoMap.get(storyId);
+      if (!storyInfo?.toot_id) continue;
+
+      // Convert to ClusterArticle format
+      const articles: ClusterArticle[] = articleRows.map((row) => ({
+        id: row.id,
+        article: row.data,
+        feedKey: row.data._feedKey,
+        pubDate: row.pub_date,
+        score: scoreFeedItem(row.data._feedKey, row.pub_date),
+      }));
+
+      const replyText = formatThreadReply(articles);
+
+      await mastoClient.v1.statuses.create({
+        status: replyText,
+        inReplyToId: storyInfo.toot_id,
+        visibility: "public",
+        language: "de",
+      });
+
+      // Mark articles as tooted
+      const articleIds = articles.map((a) => a.id);
+      await db
+        .from(settings.db_table)
+        .update({ tooted: true })
+        .in("id", articleIds);
+
+      console.log(
+        `Threaded reply: ${articleIds.length} articles to story ${storyId.slice(0, 8)}...`
+      );
+
+      threadCount++;
+      await sleep(3000);
+    } catch (e) {
+      console.error(`Failed to post thread reply: ${e}`);
+      // Still mark as tooted to avoid retry loops
+      const articleIds = articleRows.map((r) => r.id);
+      await db
+        .from(settings.db_table)
+        .update({ tooted: true })
+        .in("id", articleIds);
+    }
+  }
+
+  if (batch.length === 0 && threadCount === 0) {
+    console.log("No stories or threads to post.");
   }
 
   if (parentPort) parentPort.postMessage("done");

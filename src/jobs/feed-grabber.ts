@@ -5,6 +5,7 @@ const settings = require("../data/settings.json");
 
 import getFeed from "../helper/getFeed.js";
 import createClient from "../helper/db.js";
+import { processNewArticles, ArticleForMatching } from "../helper/storyMatcher.js";
 
 import CryptoJS from "crypto-js";
 import { asyncForEach } from "../helper/async.js";
@@ -53,12 +54,28 @@ const supabase = createClient();
 
     if (newData.length > 0) {
       console.log(`Inserting ${newData.length} new items`);
-      const { error: insertError } = await supabase
+      const { data: inserted, error: insertError } = await supabase
         .from(settings.db_table)
-        .insert(newData);
+        .insert(newData)
+        .select("id, data, pub_date");
 
       if (insertError) {
         console.error(insertError.message);
+        return false;
+      }
+
+      // Process newly inserted articles for story assignment
+      if (inserted && inserted.length > 0) {
+        const articlesForMatching: ArticleForMatching[] = inserted.map(
+          (row: { id: string; data: any; pub_date: string }) => ({
+            id: row.id,
+            title: row.data.title || "",
+            contentSnippet: row.data.contentSnippet,
+            pubDate: row.pub_date,
+            feedKey: row.data._feedKey,
+          })
+        );
+        await processNewArticles(articlesForMatching, settings.db_table);
       }
 
       return true;
