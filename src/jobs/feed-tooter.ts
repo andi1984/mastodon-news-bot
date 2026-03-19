@@ -179,13 +179,13 @@ type StoryInfo = {
       }
       followUpGroups.get(article.story_id)!.push(article);
     } else if (storyInfo.tooted) {
-      // Story tooted but threading disabled - suppress
+      // Story tooted but threading disabled - delete immediately (no value keeping)
       const { error } = await db
         .from(settings.db_table)
-        .update({ tooted: true })
+        .delete()
         .eq("id", article.id);
       if (error) {
-        console.error(`Failed to suppress article ${article.id}: ${error.message}`);
+        console.error(`Failed to delete suppressed article ${article.id}: ${error.message}`);
       }
     } else {
       // Story not yet posted - queue for posting
@@ -353,19 +353,24 @@ type StoryInfo = {
         await markStoryTooted(story.storyId, tootResult.id);
       }
 
-      // Mark articles as tooted
+      // Delete articles immediately after successful toot (aggressive cleanup)
       const articleIds = story.articles.map((a) => a.id);
-      const { error: errorOnUpdate } = await db
+      const { error: errorOnDelete } = await db
         .from(settings.db_table)
-        .update({ tooted: true })
+        .delete()
         .in("id", articleIds);
 
-      if (errorOnUpdate) {
-        console.error(`Failed to mark articles as tooted: ${errorOnUpdate.message}`);
+      if (errorOnDelete) {
+        console.error(`Failed to delete tooted articles: ${errorOnDelete.message}`);
+        // Fallback: mark as tooted so cleanup job handles it
+        await db
+          .from(settings.db_table)
+          .update({ tooted: true })
+          .in("id", articleIds);
       } else {
         const sourceCount = new Set(story.articles.map((a) => a.feedKey)).size;
         console.log(
-          `Tooted story: ${articleIds.length} articles from ${sourceCount} sources (primary=${primary.feedKey}${story.isBreaking ? ", BREAKING" : ""})`
+          `Tooted & deleted: ${articleIds.length} articles from ${sourceCount} sources (primary=${primary.feedKey}${story.isBreaking ? ", BREAKING" : ""})`
         );
       }
 
@@ -404,26 +409,26 @@ type StoryInfo = {
         language: "de",
       });
 
-      // Mark articles as tooted
+      // Delete articles immediately after successful thread reply
       const articleIds = articles.map((a) => a.id);
       await db
         .from(settings.db_table)
-        .update({ tooted: true })
+        .delete()
         .in("id", articleIds);
 
       console.log(
-        `Threaded reply: ${articleIds.length} articles to story ${storyId.slice(0, 8)}...`
+        `Threaded reply & deleted: ${articleIds.length} articles to story ${storyId.slice(0, 8)}...`
       );
 
       threadCount++;
       await sleep(3000);
     } catch (e) {
       console.error(`Failed to post thread reply: ${e}`);
-      // Still mark as tooted to avoid retry loops
+      // Still delete to avoid retry loops (content was problematic anyway)
       const articleIds = articleRows.map((r) => r.id);
       await db
         .from(settings.db_table)
-        .update({ tooted: true })
+        .delete()
         .in("id", articleIds);
     }
   }

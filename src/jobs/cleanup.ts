@@ -4,78 +4,238 @@ const require = createRequire(import.meta.url);
 const settings = require("../data/settings.json");
 import createClient from "../helper/db.js";
 
-// Create a single supabase client for interacting with your database
 const supabase = createClient();
 
-(async () => {
+// Configurable retention periods (in hours unless noted)
+const TOOTED_ARTICLE_RETENTION_HOURS = 0; // Delete immediately after tooting
+const STALE_UNTOOTED_RETENTION_HOURS = settings.min_freshness_hours || 24;
+const TOOTED_STORY_RETENTION_DAYS = (settings as any).story_retention_days ?? 3;
+const UNTOOTED_STORY_RETENTION_DAYS = (settings as any).untooted_story_retention_days ?? 1;
+const AI_USAGE_RETENTION_DAYS = (settings as any).ai_usage_retention_days ?? 14;
+const MAX_STORY_TOKENS = 150; // Prune token arrays larger than this
+
+interface CleanupStats {
+  tootedArticles: number;
+  staleArticles: number;
+  tootedStories: number;
+  untootedStories: number;
+  orphanedStoryRefs: number;
+  aiUsageRows: number;
+  prunedStoryTokens: number;
+}
+
+async function cleanupTootedArticles(): Promise<number> {
   const { data, error } = await supabase
     .from(settings.db_table)
     .delete()
     .eq("tooted", true)
     .select("id");
 
-  console.log(`Deleted ${data?.length ?? 0} tooted entries`);
+  if (error) {
+    console.error(`Cleanup tooted articles: ${error.message}`);
+    return 0;
+  }
+  return data?.length ?? 0;
+}
+
+async function cleanupStaleArticles(): Promise<number> {
+  const cutoff = new Date();
+  cutoff.setHours(cutoff.getHours() - STALE_UNTOOTED_RETENTION_HOURS);
+
+  const { data, error } = await supabase
+    .from(settings.db_table)
+    .delete()
+    .eq("tooted", false)
+    .or(`pub_date.lt.${cutoff.toISOString()},created_at.lt.${cutoff.toISOString()}`)
+    .select("id");
 
   if (error) {
-    console.error(error.message);
+    console.error(`Cleanup stale articles: ${error.message}`);
+    return 0;
   }
+  return data?.length ?? 0;
+}
 
-  // Optional filter for feed items within certain freshness interval (hours)
-  if (!!settings.min_freshness_hours) {
-    // https://github.com/supabase/supabase/discussions/3734#discussioncomment-1579562
-    const minFreshnessDate = new Date();
-    minFreshnessDate.setHours(
-      minFreshnessDate.getHours() - settings.min_freshness_hours
-    );
+async function cleanupTootedStories(): Promise<number> {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - TOOTED_STORY_RETENTION_DAYS);
 
-    console.log(`Cleaning up untooted items older than ${minFreshnessDate}.`);
-    const { data: staleData, error: freshnessError } = await supabase
-      .from(settings.db_table)
-      .delete()
-      .eq("tooted", false)
-      .or(`pub_date.lte.${minFreshnessDate.toISOString()},created_at.lte.${minFreshnessDate.toISOString()}`)
-      .select("id");
-
-    console.log(`Cleaned up ${staleData?.length ?? 0} stale feed items.`);
-
-    if (freshnessError) {
-      console.error(freshnessError.message);
-    }
-  }
-
-  // Clean up old stories (keep for 7 days after tooting, 3 days if not tooted)
-  const tootedStoryCutoff = new Date();
-  tootedStoryCutoff.setDate(tootedStoryCutoff.getDate() - 7);
-
-  const { data: oldTootedStories, error: storyError1 } = await supabase
+  const { data, error } = await supabase
     .from("stories")
     .delete()
     .eq("tooted", true)
-    .lt("updated_at", tootedStoryCutoff.toISOString())
+    .lt("updated_at", cutoff.toISOString())
     .select("id");
 
-  if (storyError1) {
-    console.error(`Failed to clean up old tooted stories: ${storyError1.message}`);
-  } else {
-    console.log(`Cleaned up ${oldTootedStories?.length ?? 0} old tooted stories.`);
+  if (error) {
+    console.error(`Cleanup tooted stories: ${error.message}`);
+    return 0;
   }
+  return data?.length ?? 0;
+}
 
-  const untootedStoryCutoff = new Date();
-  untootedStoryCutoff.setDate(untootedStoryCutoff.getDate() - 3);
+async function cleanupUntootedStories(): Promise<number> {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - UNTOOTED_STORY_RETENTION_DAYS);
 
-  const { data: oldUntootedStories, error: storyError2 } = await supabase
+  const { data, error } = await supabase
     .from("stories")
     .delete()
     .eq("tooted", false)
-    .lt("updated_at", untootedStoryCutoff.toISOString())
+    .lt("updated_at", cutoff.toISOString())
     .select("id");
 
-  if (storyError2) {
-    console.error(`Failed to clean up old untooted stories: ${storyError2.message}`);
-  } else {
-    console.log(`Cleaned up ${oldUntootedStories?.length ?? 0} old untooted stories.`);
+  if (error) {
+    console.error(`Cleanup untooted stories: ${error.message}`);
+    return 0;
   }
+  return data?.length ?? 0;
+}
+
+async function cleanupOrphanedStoryRefs(): Promise<number> {
+  // Find articles with story_id that no longer exist in stories table
+  const { data: articlesWithStories, error: fetchError } = await supabase
+    .from(settings.db_table)
+    .select("id, story_id")
+    .not("story_id", "is", null);
+
+  if (fetchError || !articlesWithStories || articlesWithStories.length === 0) {
+    return 0;
+  }
+
+  // Get all existing story IDs
+  const storyIds = [...new Set(articlesWithStories.map((a: any) => a.story_id))];
+  const { data: existingStories, error: storyError } = await supabase
+    .from("stories")
+    .select("id")
+    .in("id", storyIds);
+
+  if (storyError) {
+    console.error(`Cleanup orphan refs: ${storyError.message}`);
+    return 0;
+  }
+
+  const existingStoryIds = new Set((existingStories ?? []).map((s: any) => s.id));
+  const orphanedArticleIds = articlesWithStories
+    .filter((a: any) => !existingStoryIds.has(a.story_id))
+    .map((a: any) => a.id);
+
+  if (orphanedArticleIds.length === 0) {
+    return 0;
+  }
+
+  // Clear orphaned story_id references
+  const { error: updateError } = await supabase
+    .from(settings.db_table)
+    .update({ story_id: null })
+    .in("id", orphanedArticleIds);
+
+  if (updateError) {
+    console.error(`Cleanup orphan refs update: ${updateError.message}`);
+    return 0;
+  }
+
+  return orphanedArticleIds.length;
+}
+
+async function cleanupAiUsage(): Promise<number> {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - AI_USAGE_RETENTION_DAYS);
+
+  const { data, error } = await supabase
+    .from("ai_usage")
+    .delete()
+    .lt("created_at", cutoff.toISOString())
+    .select("id");
+
+  if (error) {
+    // Table might not exist - that's ok
+    if (!error.message.includes("does not exist")) {
+      console.error(`Cleanup AI usage: ${error.message}`);
+    }
+    return 0;
+  }
+  return data?.length ?? 0;
+}
+
+async function pruneStoryTokens(): Promise<number> {
+  // Find stories with oversized token arrays
+  const { data: largeStories, error: fetchError } = await supabase
+    .from("stories")
+    .select("id, tokens")
+    .not("tokens", "is", null);
+
+  if (fetchError || !largeStories) {
+    return 0;
+  }
+
+  let pruned = 0;
+  for (const story of largeStories as { id: string; tokens: string[] }[]) {
+    if (story.tokens && story.tokens.length > MAX_STORY_TOKENS) {
+      // Keep most common/important tokens (first N added are usually from title)
+      const prunedTokens = story.tokens.slice(0, MAX_STORY_TOKENS);
+
+      const { error } = await supabase
+        .from("stories")
+        .update({ tokens: prunedTokens })
+        .eq("id", story.id);
+
+      if (!error) {
+        pruned++;
+      }
+    }
+  }
+
+  return pruned;
+}
+
+async function runFullCleanup(): Promise<CleanupStats> {
+  console.log("Starting comprehensive cleanup...");
+
+  // Run all cleanup tasks in parallel where possible
+  const [
+    tootedArticles,
+    staleArticles,
+    tootedStories,
+    untootedStories,
+  ] = await Promise.all([
+    cleanupTootedArticles(),
+    cleanupStaleArticles(),
+    cleanupTootedStories(),
+    cleanupUntootedStories(),
+  ]);
+
+  // These depend on stories being cleaned first
+  const [orphanedStoryRefs, aiUsageRows, prunedStoryTokens] = await Promise.all([
+    cleanupOrphanedStoryRefs(),
+    cleanupAiUsage(),
+    pruneStoryTokens(),
+  ]);
+
+  return {
+    tootedArticles,
+    staleArticles,
+    tootedStories,
+    untootedStories,
+    orphanedStoryRefs,
+    aiUsageRows,
+    prunedStoryTokens,
+  };
+}
+
+(async () => {
+  const stats = await runFullCleanup();
+
+  const total = Object.values(stats).reduce((a, b) => a + b, 0);
+
+  console.log(`Cleanup complete: ${total} items processed`);
+  console.log(`  Articles: ${stats.tootedArticles} tooted, ${stats.staleArticles} stale`);
+  console.log(`  Stories: ${stats.tootedStories} tooted, ${stats.untootedStories} untooted`);
+  console.log(`  Maintenance: ${stats.orphanedStoryRefs} orphan refs, ${stats.aiUsageRows} AI logs, ${stats.prunedStoryTokens} token arrays pruned`);
 
   if (parentPort) parentPort.postMessage("done");
   else process.exit(0);
 })();
+
+// Export for use in other modules (inline cleanup after tooting)
+export { cleanupTootedArticles, cleanupOrphanedStoryRefs, runFullCleanup };

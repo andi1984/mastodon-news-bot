@@ -69,8 +69,8 @@ const bree = new Bree({
       cron: "30 1,3,5 * * *", // Every 2 hours offset
     },
     { name: "alive", interval: "30m" },
-    // Cleanup happens AFTER min_freshness_hours
-    { name: "cleanup", interval: `${settings.min_freshness_hours * 3}h` },
+    // Aggressive cleanup: every 6 hours (was 72h)
+    { name: "cleanup", cron: "0 0,6,12,18 * * *" },
     // Daily digest at 22:00
     {
       name: "daily-digest",

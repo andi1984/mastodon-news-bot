@@ -30,6 +30,7 @@ export interface ArticleForMatching {
 const STORY_SIMILARITY_THRESHOLD =
   (settings as any).story_similarity_threshold ?? 0.35;
 const STORY_MAX_AGE_HOURS = (settings as any).story_max_age_hours ?? 72;
+const MAX_STORY_TOKENS = 150; // Prevent unbounded token array growth
 
 // AI matching thresholds - only use AI when token score is uncertain
 const AI_UNCERTAIN_LOW = 0.15; // Below this: definitely different stories
@@ -193,7 +194,10 @@ export async function createStory(
   const articleText = article.contentSnippet
     ? `${article.title} ${article.contentSnippet.slice(0, 500)}`
     : article.title;
-  const tokens = Array.from(tokenize(articleText));
+  let tokens = Array.from(tokenize(articleText));
+  if (tokens.length > MAX_STORY_TOKENS) {
+    tokens = tokens.slice(0, MAX_STORY_TOKENS);
+  }
 
   const { data, error } = await db
     .from("stories")
@@ -235,7 +239,7 @@ export async function addArticleToStory(
     return;
   }
 
-  // Merge tokens
+  // Merge tokens (capped to prevent unbounded growth)
   const articleText = article.contentSnippet
     ? `${article.title} ${article.contentSnippet.slice(0, 500)}`
     : article.title;
@@ -246,11 +250,17 @@ export async function addArticleToStory(
     existingTokens.add(token);
   }
 
+  // Cap token array size to prevent DB bloat
+  let finalTokens = Array.from(existingTokens);
+  if (finalTokens.length > MAX_STORY_TOKENS) {
+    finalTokens = finalTokens.slice(0, MAX_STORY_TOKENS);
+  }
+
   // Update story
   const { error: updateError } = await db
     .from("stories")
     .update({
-      tokens: Array.from(existingTokens),
+      tokens: finalTokens,
       article_count: story.article_count + 1,
       updated_at: new Date().toISOString(),
     })
