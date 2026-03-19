@@ -16,7 +16,7 @@
     "cleanup-replies": "TS_NODE=true NODE_OPTIONS=\"--loader ts-node/esm\" node scripts/cleanup-auto-replies.ts",
     "daily-digest": "TS_NODE=true NODE_OPTIONS=\"--loader ts-node/esm\" node src/jobs/daily-digest.ts",
     "weekly-digest": "TS_NODE=true NODE_OPTIONS=\"--loader ts-node/esm\" node src/jobs/weekly-digest.ts",
-    "manage-feeds": "TS_NODE=true NODE_OPTIONS=\"--loader ts-node/esm\" node scripts/manage-feeds.ts"
+    "manage-feeds": "TS_NODE=true NODE_OPTIONS=\"--loader ts-node/esm --no-warnings\" node scripts/manage-feeds.ts"
   },
   "author": "Andreas Sander (mail@andi1984.de)",
   "license": "MIT",

@@ -13,14 +13,31 @@
     "mfw-events": "https://www.saarland.de/mfw/DE/aktuelles/rss-feed/_feeds/veranstaltungen_feed.xml",
     "mfw-pressemitteilungen": "https://www.saarland.de/mfw/DE/aktuelles/rss-feed/_feeds/pressemitteilungen_feed.xml"
   },
-  "feed_hashtags": ["news", "saarlandnews"],
+  "feed_hashtags": [
+    "news",
+    "saarlandnews"
+  ],
   "feed_specific_hashtags": {
-    "polizei": ["polizei", "blaulicht"],
-    "fahrrad": ["fahrrad", "radverkehr"],
-    "tagesschau": ["tagesschau"],
-    "saarbruecker-zeitung": ["saarbrückerzeitung"],
-    "mfw-events": ["veranstaltung"],
-    "mfw-pressemitteilungen": ["pressemitteilung"]
+    "polizei": [
+      "polizei",
+      "blaulicht"
+    ],
+    "fahrrad": [
+      "fahrrad",
+      "radverkehr"
+    ],
+    "tagesschau": [
+      "tagesschau"
+    ],
+    "saarbruecker-zeitung": [
+      "saarbrückerzeitung"
+    ],
+    "mfw-events": [
+      "veranstaltung"
+    ],
+    "mfw-pressemitteilungen": [
+      "pressemitteilung"
+    ]
   },
   "toot_batch_size": 3,
   "feed_priorities": {
@@ -30,7 +47,7 @@
     "polizei": 0.5,
     "breaking-news": 0.7,
     "dudplaner": 0.9,
-    "fahrrad": 1.0,
+    "fahrrad": 1,
     "mfw-events": 0.9,
     "mfw-pressemitteilungen": 0.9
   },
@@ -38,7 +55,7 @@
   "similarity_threshold": 0.4,
   "breaking_news_min_sources": 3,
   "breaking_news_time_window_hours": 2,
-  "breaking_news_priority_boost": 2.0,
+  "breaking_news_priority_boost": 2,
   "qa_enabled": true,
   "qa_max_results": 5,
   "qa_min_text_length": 10,
@@ -46,29 +63,56 @@
   "qa_header_text": "Hier sind passende Nachrichten:",
   "regional_relevance": {
     "enabled": true,
-    "always_local_feeds": ["saarnews", "breaking-news", "polizei", "fahrrad", "dudplaner", "mfw-events", "mfw-pressemitteilungen"],
-    "multipliers": { "local": 1.5, "regional": 1.2, "national": 1.0, "international": 0.6 }
+    "always_local_feeds": [
+      "saarnews",
+      "breaking-news",
+      "polizei",
+      "fahrrad",
+      "dudplaner",
+      "mfw-events",
+      "mfw-pressemitteilungen"
+    ],
+    "multipliers": {
+      "local": 1.5,
+      "regional": 1.2,
+      "national": 1,
+      "international": 0.6
+    }
   },
   "cw_mapping": [
     {
       "label": "Gewalt",
       "id": "gewalt",
-      "words": ["gewalt", "schlägerei", "stecherei", "tötung"]
+      "words": [
+        "gewalt",
+        "schlägerei",
+        "stecherei",
+        "tötung"
+      ]
     },
     {
       "label": "Unfall",
       "id": "unfall",
-      "words": ["verunglückt", "unfall", "crash", "verletzt"]
+      "words": [
+        "verunglückt",
+        "unfall",
+        "crash",
+        "verletzt"
+      ]
     },
     {
       "label": "Feuer",
       "id": "feuer",
-      "words": ["brand"]
+      "words": [
+        "brand"
+      ]
     },
     {
       "label": "Verletzung",
       "id": "verletzung",
-      "words": ["verletzt"]
+      "words": [
+        "verletzt"
+      ]
     }
   ]
 }

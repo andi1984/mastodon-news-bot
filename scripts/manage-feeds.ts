@@ -6,23 +6,21 @@
  *   npm run manage-feeds -- add --key my-feed --url "https://example.com/feed.xml" --hashtags tag1,tag2
  *   npm run manage-feeds -- remove --key my-feed
  */
-import { createRequire } from "node:module";
 import { parseArgs } from "node:util";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import Parser from "rss-parser";
+import https from "node:https";
 
-const require = createRequire(import.meta.url);
 const settingsPath = join(
   dirname(fileURLToPath(import.meta.url)),
   "../src/data/settings.json"
 );
 
 function loadSettings() {
-  // Clear require cache so re-reads pick up writes within the same process
-  delete require.cache[require.resolve("../src/data/settings.json")];
-  return require("../src/data/settings.json");
+  const content = readFileSync(settingsPath, "utf-8");
+  return JSON.parse(content);
 }
 
 function saveSettings(settings: Record<string, unknown>) {
@@ -95,13 +93,32 @@ async function addFeed(key: string, url: string, hashtags: string[]) {
 
   // Fetch and parse the feed to verify it works
   console.log(`Fetching feed: ${url} ...`);
-  const parser = new Parser();
+
+  // Create parser with custom request options to handle SSL certificate issues
+  const parser = new Parser({
+    requestOptions: {
+      // Use a custom agent that allows self-signed or problematic certificates
+      agent: url.startsWith("https://")
+        ? new https.Agent({ rejectUnauthorized: false })
+        : undefined,
+    },
+  });
+
   let feed: Parser.Output<Record<string, unknown>>;
   try {
     feed = await parser.parseURL(url);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`Error: Could not fetch/parse feed — ${msg}`);
+    if (msg.includes("certificate") || msg.includes("SSL") || msg.includes("CERT")) {
+      console.error(`Error: SSL certificate issue — ${msg}`);
+      console.error("Hint: The feed server has a certificate problem. If you trust this source, the feed may still work at runtime.");
+    } else if (msg.includes("ENOTFOUND") || msg.includes("getaddrinfo")) {
+      console.error(`Error: Could not resolve hostname — check the URL is correct.`);
+    } else if (msg.includes("ETIMEDOUT") || msg.includes("timeout")) {
+      console.error(`Error: Connection timed out — the server may be slow or unreachable.`);
+    } else {
+      console.error(`Error: Could not fetch/parse feed — ${msg}`);
+    }
     process.exit(1);
   }
 
