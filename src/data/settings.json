@@ -11,7 +11,8 @@
     "dudplaner": "https://www.dudoplaner.de/feed/",
     "saarbruecker-zeitung": "https://www.saarbruecker-zeitung.de/feed.rss",
     "mfw-events": "https://www.saarland.de/mfw/DE/aktuelles/rss-feed/_feeds/veranstaltungen_feed.xml",
-    "mfw-pressemitteilungen": "https://www.saarland.de/mfw/DE/aktuelles/rss-feed/_feeds/pressemitteilungen_feed.xml"
+    "mfw-pressemitteilungen": "https://www.saarland.de/mfw/DE/aktuelles/rss-feed/_feeds/pressemitteilungen_feed.xml",
+    "udt": "https://udt3000.org/events/feed/"
   },
   "feed_hashtags": [
     "news",
@@ -37,6 +38,9 @@
     ],
     "mfw-pressemitteilungen": [
       "pressemitteilung"
+    ],
+    "udt": [
+      "veranstaltung"  
     ]
   },
   "toot_batch_size": 3,
@@ -49,7 +53,8 @@
     "dudplaner": 0.9,
     "fahrrad": 1,
     "mfw-events": 0.9,
-    "mfw-pressemitteilungen": 0.9
+    "mfw-pressemitteilungen": 0.9,
+    "udt": 1
   },
   "min_freshness_hours": 24,
   "similarity_threshold": 0.4,
