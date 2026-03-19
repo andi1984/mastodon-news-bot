@@ -5,84 +5,109 @@ const settings = require("../data/settings.json");
 
 import getFeed from "../helper/getFeed.js";
 import createClient from "../helper/db.js";
-import { processNewArticles, ArticleForMatching } from "../helper/storyMatcher.js";
+import { sha256 } from "../helper/hash.js";
+import {
+  processNewArticles,
+  ArticleForMatching,
+} from "../helper/storyMatcher.js";
 
-import CryptoJS from "crypto-js";
-import { asyncForEach } from "../helper/async.js";
-
-// Create a single supabase client for interacting with your database
+// Single supabase client (singleton)
 const supabase = createClient();
 
-// Iterate over all feeds
-(async () => {
-  await asyncForEach(Object.entries(settings.feeds) as [string, string][], async ([feedKey, feedURL]: [string, string]) => {
-    const rssData = await getFeed(feedURL);
+// Process feeds in parallel batches for better performance
+const BATCH_SIZE = 5;
 
-    if (!rssData) {
-      return false;
-    }
+async function processFeedBatch(
+  feedEntries: [string, string][]
+): Promise<void> {
+  await Promise.all(
+    feedEntries.map(async ([feedKey, feedURL]) => {
+      try {
+        const rssData = await getFeed(feedURL);
 
-    // 1. Hash feedURL to get a unique id for the table
-    const tableId = CryptoJS.SHA256(feedURL);
+        if (!rssData) {
+          return;
+        }
 
-    const candidates = rssData.items.map((item: any) => {
-      const rawDate = item.pubDate ?? item.isoDate;
-      const parsed = rawDate ? new Date(rawDate) : new Date();
-      const pubDate = isNaN(parsed.getTime()) ? new Date() : parsed;
-      return {
-        hash: `${tableId}-${CryptoJS.SHA256(item.title)}-${CryptoJS.SHA256(item.link)}`,
-        data: { ...item, _feedKey: feedKey },
-        pub_date: pubDate.toISOString(),
-      };
-    });
+        // Hash feedURL once for this feed
+        const tableId = sha256(feedURL);
 
-    if (candidates.length === 0) return false;
+        const candidates = rssData.items.map((item: any) => {
+          const rawDate = item.pubDate ?? item.isoDate;
+          const parsed = rawDate ? new Date(rawDate) : new Date();
+          const pubDate = isNaN(parsed.getTime()) ? new Date() : parsed;
+          return {
+            hash: `${tableId}-${sha256(item.title)}-${sha256(item.link)}`,
+            data: { ...item, _feedKey: feedKey },
+            pub_date: pubDate.toISOString(),
+          };
+        });
 
-    // Batch-check which hashes already exist (single query instead of N)
-    const { data: existing, error } = await supabase
-      .from(settings.db_table)
-      .select("hash")
-      .in("hash", candidates.map(c => c.hash));
+        if (candidates.length === 0) return;
 
-    if (error) {
-      console.error(error.message);
-      return false;
-    }
+        // Batch-check which hashes already exist (single query instead of N)
+        const { data: existing, error } = await supabase
+          .from(settings.db_table)
+          .select("hash")
+          .in(
+            "hash",
+            candidates.map((c) => c.hash)
+          );
 
-    const existingSet = new Set((existing ?? []).map((e: { hash: string }) => e.hash));
-    const newData = candidates.filter(c => !existingSet.has(c.hash));
+        if (error) {
+          console.error(`[${feedKey}] ${error.message}`);
+          return;
+        }
 
-    if (newData.length > 0) {
-      console.log(`Inserting ${newData.length} new items`);
-      const { data: inserted, error: insertError } = await supabase
-        .from(settings.db_table)
-        .insert(newData)
-        .select("id, data, pub_date");
-
-      if (insertError) {
-        console.error(insertError.message);
-        return false;
-      }
-
-      // Process newly inserted articles for story assignment
-      if (inserted && inserted.length > 0) {
-        const articlesForMatching: ArticleForMatching[] = inserted.map(
-          (row: { id: string; data: any; pub_date: string }) => ({
-            id: row.id,
-            title: row.data.title || "",
-            contentSnippet: row.data.contentSnippet,
-            pubDate: row.pub_date,
-            feedKey: row.data._feedKey,
-          })
+        const existingSet = new Set(
+          (existing ?? []).map((e: { hash: string }) => e.hash)
         );
-        await processNewArticles(articlesForMatching, settings.db_table);
+        const newData = candidates.filter((c) => !existingSet.has(c.hash));
+
+        if (newData.length > 0) {
+          console.log(`[${feedKey}] Inserting ${newData.length} new items`);
+          const { data: inserted, error: insertError } = await supabase
+            .from(settings.db_table)
+            .insert(newData)
+            .select("id, data, pub_date");
+
+          if (insertError) {
+            console.error(`[${feedKey}] ${insertError.message}`);
+            return;
+          }
+
+          // Process newly inserted articles for story assignment
+          if (inserted && inserted.length > 0) {
+            const articlesForMatching: ArticleForMatching[] = inserted.map(
+              (row: { id: string; data: any; pub_date: string }) => ({
+                id: row.id,
+                title: row.data.title || "",
+                contentSnippet: row.data.contentSnippet,
+                pubDate: row.pub_date,
+                feedKey: row.data._feedKey,
+              })
+            );
+            await processNewArticles(articlesForMatching, settings.db_table);
+          }
+        }
+      } catch (err) {
+        console.error(`[${feedKey}] Unexpected error: ${err}`);
       }
+    })
+  );
+}
 
-      return true;
-    }
+(async () => {
+  const feedEntries = Object.entries(settings.feeds) as [string, string][];
+  console.log(`Processing ${feedEntries.length} feeds...`);
 
-    return false;
-  });
+  // Process feeds in parallel batches
+  for (let i = 0; i < feedEntries.length; i += BATCH_SIZE) {
+    const batch = feedEntries.slice(i, i + BATCH_SIZE);
+    await processFeedBatch(batch);
+  }
+
+  console.log("Feed grabber complete");
 
   if (parentPort) parentPort.postMessage("done");
   else process.exit(0);

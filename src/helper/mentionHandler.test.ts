@@ -1,3 +1,5 @@
+import { jest, describe, test, expect, beforeEach } from "@jest/globals";
+
 const mockCreate = jest.fn();
 const mockDismiss = jest.fn();
 const mockList = jest.fn();
@@ -23,12 +25,12 @@ const mockClient = {
 } as any;
 
 const mockAnswerQuestion = jest.fn();
-jest.mock("./questionAnswerer", () => ({
-  __esModule: true,
-  answerQuestion: (...args: any[]) => mockAnswerQuestion(...args),
+
+jest.unstable_mockModule("./questionAnswerer", () => ({
+  answerQuestion: mockAnswerQuestion,
 }));
 
-import { handleMentions, isNewsTootThread } from "./mentionHandler.js";
+const { handleMentions, isNewsTootThread } = await import("./mentionHandler.js");
 
 const defaultConfig = {
   username: "saarlandnews",

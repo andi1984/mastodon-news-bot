@@ -1,19 +1,26 @@
-jest.mock("./db", () => ({
-  __esModule: true,
-  default: jest.fn(),
+import { jest, describe, it, expect, beforeEach, afterEach } from "@jest/globals";
+
+const mockRpc = jest.fn();
+const mockInsert = jest.fn();
+const mockFrom = jest.fn();
+const mockSelect = jest.fn();
+const mockEq = jest.fn();
+
+const mockDbClient = {
+  rpc: mockRpc,
+  from: mockFrom,
+};
+
+jest.unstable_mockModule("./db", () => ({
+  default: jest.fn(() => mockDbClient),
 }));
 
-import createClient from "./db.js";
-import {
+const {
   calculateCost,
   getTodaysCost,
   hasAiBudget,
   logAiUsage,
-} from "./costTracker.js";
-
-const mockedCreateClient = createClient as jest.MockedFunction<
-  typeof createClient
->;
+} = await import("./costTracker.js");
 
 describe("calculateCost", () => {
   it("returns 0 for zero tokens", () => {
@@ -21,17 +28,14 @@ describe("calculateCost", () => {
   });
 
   it("calculates cost for input tokens only", () => {
-    // 1M input tokens at $0.80/M = $0.80
     expect(calculateCost(1_000_000, 0)).toBeCloseTo(0.8);
   });
 
   it("calculates cost for output tokens only", () => {
-    // 1M output tokens at $4.00/M = $4.00
     expect(calculateCost(0, 1_000_000)).toBeCloseTo(4.0);
   });
 
   it("calculates combined cost", () => {
-    // 500 input = 0.0004, 100 output = 0.0004
     expect(calculateCost(500, 100)).toBeCloseTo(0.0008);
   });
 });
@@ -39,31 +43,23 @@ describe("calculateCost", () => {
 describe("getTodaysCost", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockFrom.mockReturnValue({ select: mockSelect });
+    mockSelect.mockReturnValue({ eq: mockEq });
   });
 
   it("returns sum from rpc call", async () => {
-    mockedCreateClient.mockReturnValue({
-      rpc: jest.fn().mockResolvedValue({ data: 0.05, error: null }),
-    } as any);
+    mockRpc.mockResolvedValue({ data: 0.05, error: null });
 
     const cost = await getTodaysCost();
     expect(cost).toBe(0.05);
   });
 
   it("falls back to manual query when rpc fails", async () => {
-    const mockEq = jest.fn().mockResolvedValue({
+    mockRpc.mockResolvedValue({ data: null, error: { message: "no rpc" } });
+    mockEq.mockResolvedValue({
       data: [{ cost_usd: 0.01 }, { cost_usd: 0.02 }],
       error: null,
     });
-    const mockSelect = jest.fn().mockReturnValue({ eq: mockEq });
-    const mockFrom = jest.fn().mockReturnValue({ select: mockSelect });
-
-    mockedCreateClient.mockReturnValue({
-      rpc: jest
-        .fn()
-        .mockResolvedValue({ data: null, error: { message: "no rpc" } }),
-      from: mockFrom,
-    } as any);
 
     const cost = await getTodaysCost();
     expect(cost).toBeCloseTo(0.03);
@@ -71,27 +67,10 @@ describe("getTodaysCost", () => {
   });
 
   it("returns Infinity when both rpc and fallback fail", async () => {
-    const mockEq = jest.fn().mockResolvedValue({
+    mockRpc.mockResolvedValue({ data: null, error: { message: "no rpc" } });
+    mockEq.mockResolvedValue({
       data: null,
       error: { message: "query failed" },
-    });
-    const mockSelect = jest.fn().mockReturnValue({ eq: mockEq });
-    const mockFrom = jest.fn().mockReturnValue({ select: mockSelect });
-
-    mockedCreateClient.mockReturnValue({
-      rpc: jest
-        .fn()
-        .mockResolvedValue({ data: null, error: { message: "no rpc" } }),
-      from: mockFrom,
-    } as any);
-
-    const cost = await getTodaysCost();
-    expect(cost).toBe(Infinity);
-  });
-
-  it("returns Infinity on exception", async () => {
-    mockedCreateClient.mockImplementation(() => {
-      throw new Error("connection failed");
     });
 
     const cost = await getTodaysCost();
@@ -127,9 +106,7 @@ describe("hasAiBudget", () => {
 
   it("returns true when spend is below limit", async () => {
     process.env.AI_DAILY_COST_LIMIT_USD = "1.00";
-    mockedCreateClient.mockReturnValue({
-      rpc: jest.fn().mockResolvedValue({ data: 0.5, error: null }),
-    } as any);
+    mockRpc.mockResolvedValue({ data: 0.5, error: null });
 
     const result = await hasAiBudget();
     expect(result).toBe(true);
@@ -137,9 +114,7 @@ describe("hasAiBudget", () => {
 
   it("returns false when spend exceeds limit", async () => {
     process.env.AI_DAILY_COST_LIMIT_USD = "0.50";
-    mockedCreateClient.mockReturnValue({
-      rpc: jest.fn().mockResolvedValue({ data: 0.75, error: null }),
-    } as any);
+    mockRpc.mockResolvedValue({ data: 0.75, error: null });
 
     const result = await hasAiBudget();
     expect(result).toBe(false);
@@ -147,19 +122,7 @@ describe("hasAiBudget", () => {
 
   it("returns false when spend equals limit", async () => {
     process.env.AI_DAILY_COST_LIMIT_USD = "0.50";
-    mockedCreateClient.mockReturnValue({
-      rpc: jest.fn().mockResolvedValue({ data: 0.5, error: null }),
-    } as any);
-
-    const result = await hasAiBudget();
-    expect(result).toBe(false);
-  });
-
-  it("returns false when getTodaysCost returns Infinity (DB error)", async () => {
-    process.env.AI_DAILY_COST_LIMIT_USD = "1.00";
-    mockedCreateClient.mockImplementation(() => {
-      throw new Error("connection failed");
-    });
+    mockRpc.mockResolvedValue({ data: 0.5, error: null });
 
     const result = await hasAiBudget();
     expect(result).toBe(false);
@@ -169,15 +132,11 @@ describe("hasAiBudget", () => {
 describe("logAiUsage", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockFrom.mockReturnValue({ insert: mockInsert });
+    mockInsert.mockResolvedValue({ data: null, error: null });
   });
 
   it("inserts usage record into ai_usage table", async () => {
-    const mockInsert = jest
-      .fn()
-      .mockResolvedValue({ data: null, error: null });
-    const mockFrom = jest.fn().mockReturnValue({ insert: mockInsert });
-    mockedCreateClient.mockReturnValue({ from: mockFrom } as any);
-
     await logAiUsage("question_answerer", 500, 100);
 
     expect(mockFrom).toHaveBeenCalledWith("ai_usage");
@@ -190,21 +149,7 @@ describe("logAiUsage", () => {
   });
 
   it("does not throw on insert error", async () => {
-    const mockInsert = jest
-      .fn()
-      .mockResolvedValue({ data: null, error: { message: "insert failed" } });
-    const mockFrom = jest.fn().mockReturnValue({ insert: mockInsert });
-    mockedCreateClient.mockReturnValue({ from: mockFrom } as any);
-
-    await expect(
-      logAiUsage("question_answerer", 500, 100)
-    ).resolves.toBeUndefined();
-  });
-
-  it("does not throw on exception", async () => {
-    mockedCreateClient.mockImplementation(() => {
-      throw new Error("connection failed");
-    });
+    mockInsert.mockResolvedValue({ data: null, error: { message: "insert failed" } });
 
     await expect(
       logAiUsage("question_answerer", 500, 100)

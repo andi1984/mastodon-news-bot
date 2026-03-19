@@ -1,14 +1,13 @@
-import { createRestAPIClient } from "masto";
+import { jest, describe, test, expect, beforeEach, afterEach } from "@jest/globals";
 
 const fakeClient = { v1: {} } as any;
+const mockCreateRestAPIClient = jest.fn(() => fakeClient);
 
-jest.mock("masto", () => ({
-  createRestAPIClient: jest.fn(() => fakeClient),
+jest.unstable_mockModule("masto", () => ({
+  createRestAPIClient: mockCreateRestAPIClient,
 }));
 
-const mockedCreate = createRestAPIClient as jest.Mock;
-
-import login from "./login.js";
+const { default: login } = await import("./login.js");
 
 describe("login", () => {
   const ORIG_ENV = process.env;
@@ -19,7 +18,7 @@ describe("login", () => {
       API_INSTANCE: "https://mastodon.example",
       ACCESS_TOKEN: "test-token",
     };
-    mockedCreate.mockClear();
+    mockCreateRestAPIClient.mockClear();
   });
 
   afterEach(() => {
@@ -29,7 +28,7 @@ describe("login", () => {
   test("passes env vars to createRestAPIClient", async () => {
     await login();
 
-    expect(mockedCreate).toHaveBeenCalledWith({
+    expect(mockCreateRestAPIClient).toHaveBeenCalledWith({
       url: "https://mastodon.example",
       accessToken: "test-token",
     });

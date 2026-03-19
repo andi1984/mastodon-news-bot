@@ -1,22 +1,24 @@
-jest.mock("@anthropic-ai/sdk", () => {
-  return {
-    __esModule: true,
-    default: jest.fn(),
-  };
-});
+import { jest, describe, it, expect, beforeEach, afterEach } from "@jest/globals";
 
-jest.mock("./costTracker", () => ({
-  __esModule: true,
-  hasAiBudget: jest.fn().mockResolvedValue(true),
-  logAiUsage: jest.fn().mockResolvedValue(undefined),
+const mockMessagesCreate = jest.fn();
+const MockedAnthropic = jest.fn(() => ({
+  messages: { create: mockMessagesCreate },
 }));
 
-import Anthropic from "@anthropic-ai/sdk";
-import { hasAiBudget } from "./costTracker.js";
-import { scoreRegionalRelevance } from "./regionalRelevance.js";
-import { RegionalRelevanceSettings } from "../types/settings.js";
+const mockHasAiBudget = jest.fn().mockResolvedValue(true);
+const mockLogAiUsage = jest.fn().mockResolvedValue(undefined);
 
-const MockedAnthropic = Anthropic as jest.MockedClass<typeof Anthropic>;
+jest.unstable_mockModule("@anthropic-ai/sdk", () => ({
+  default: MockedAnthropic,
+}));
+
+jest.unstable_mockModule("./costTracker", () => ({
+  hasAiBudget: mockHasAiBudget,
+  logAiUsage: mockLogAiUsage,
+}));
+
+const { scoreRegionalRelevance } = await import("./regionalRelevance.js");
+import type { RegionalRelevanceSettings } from "../types/settings.js";
 
 const defaultConfig: RegionalRelevanceSettings = {
   enabled: true,
@@ -38,28 +40,10 @@ const defaultConfig: RegionalRelevanceSettings = {
 };
 
 function mockApiResponse(text: string) {
-  MockedAnthropic.mockImplementation(
-    () =>
-      ({
-        messages: {
-          create: jest.fn().mockResolvedValue({
-            content: [{ type: "text", text }],
-            usage: { input_tokens: 200, output_tokens: 80 },
-          }),
-        },
-      }) as any
-  );
-}
-
-function mockApiError() {
-  MockedAnthropic.mockImplementation(
-    () =>
-      ({
-        messages: {
-          create: jest.fn().mockRejectedValue(new Error("API error")),
-        },
-      }) as any
-  );
+  mockMessagesCreate.mockResolvedValue({
+    content: [{ type: "text", text }],
+    usage: { input_tokens: 200, output_tokens: 80 },
+  });
 }
 
 describe("scoreRegionalRelevance", () => {
@@ -68,6 +52,7 @@ describe("scoreRegionalRelevance", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     process.env = { ...originalEnv, CLAUDE_API_KEY: "test-key" };
+    mockHasAiBudget.mockResolvedValue(true);
   });
 
   afterEach(() => {
@@ -111,7 +96,7 @@ describe("scoreRegionalRelevance", () => {
     expect(result.get(0)).toBe(1.5);
     expect(result.get(1)).toBe(1.5);
     expect(result.get(2)).toBe(1.5);
-    expect(MockedAnthropic).not.toHaveBeenCalled();
+    expect(mockMessagesCreate).not.toHaveBeenCalled();
   });
 
   it("mixes always-local and API-classified articles", async () => {
@@ -140,11 +125,11 @@ describe("scoreRegionalRelevance", () => {
 
     expect(result.get(0)).toBe(1.0);
     expect(result.get(1)).toBe(1.0);
-    expect(MockedAnthropic).not.toHaveBeenCalled();
+    expect(mockMessagesCreate).not.toHaveBeenCalled();
   });
 
   it("returns neutral multipliers when AI budget is exceeded", async () => {
-    (hasAiBudget as jest.Mock).mockResolvedValueOnce(false);
+    mockHasAiBudget.mockResolvedValue(false);
 
     const articles = [
       { title: "Bundestagswahl", feedKey: "tagesschau" },
@@ -153,11 +138,11 @@ describe("scoreRegionalRelevance", () => {
     const result = await scoreRegionalRelevance(articles, defaultConfig);
 
     expect(result.get(0)).toBe(1.0);
-    expect(MockedAnthropic).not.toHaveBeenCalled();
+    expect(mockMessagesCreate).not.toHaveBeenCalled();
   });
 
   it("returns neutral multipliers when API call throws", async () => {
-    mockApiError();
+    mockMessagesCreate.mockRejectedValue(new Error("API error"));
 
     const articles = [
       { title: "Bundestagswahl", feedKey: "tagesschau" },
@@ -184,6 +169,6 @@ describe("scoreRegionalRelevance", () => {
     const result = await scoreRegionalRelevance(articles, disabledConfig);
 
     expect(result.get(0)).toBe(1.0);
-    expect(MockedAnthropic).not.toHaveBeenCalled();
+    expect(mockMessagesCreate).not.toHaveBeenCalled();
   });
 });

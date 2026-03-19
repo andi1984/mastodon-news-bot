@@ -1,3 +1,4 @@
+import { jest, describe, test, expect, beforeEach } from "@jest/globals";
 import type { mastodon } from "masto";
 
 const mockReblog = jest.fn();
@@ -6,16 +7,15 @@ const mockClient = {
   v1: { statuses: { $select: mockSelect } },
 } as any;
 
-jest.mock("./login", () => ({
-  __esModule: true,
+jest.unstable_mockModule("./login", () => ({
   default: jest.fn(() => Promise.resolve(mockClient)),
 }));
 
-jest.mock("../data/settings.json", () => ({
-  username: "saarlandnews",
+jest.unstable_mockModule("../data/settings.json", () => ({
+  default: { username: "saarlandnews" },
 }));
 
-import boost from "./boost.js";
+const { default: boost } = await import("./boost.js");
 
 function createMockStatus(
   overrides: Partial<{ id: string; inReplyToId: string | null; acct: string }>

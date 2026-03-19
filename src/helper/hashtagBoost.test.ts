@@ -1,11 +1,7 @@
+import { jest, describe, test, expect, beforeEach } from "@jest/globals";
 import type { mastodon } from "masto";
 
 const mockBoost = jest.fn();
-jest.mock("./boost", () => ({
-  __esModule: true,
-  default: mockBoost,
-}));
-
 const mockNext = jest.fn();
 const mockValues = jest.fn(() => ({ next: mockNext }));
 const mockList = jest.fn(() => ({ values: mockValues }));
@@ -14,12 +10,15 @@ const mockClient = {
   v1: { timelines: { tag: { $select: mockTagSelect } } },
 } as any;
 
-jest.mock("./login", () => ({
-  __esModule: true,
+jest.unstable_mockModule("./boost", () => ({
+  default: mockBoost,
+}));
+
+jest.unstable_mockModule("./login", () => ({
   default: jest.fn(() => Promise.resolve(mockClient)),
 }));
 
-import hashtagBoost from "./hashtagBoost.js";
+const { default: hashtagBoost } = await import("./hashtagBoost.js");
 
 describe("hashtagBoost", () => {
   beforeEach(() => {
