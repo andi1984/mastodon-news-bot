@@ -67,10 +67,17 @@ function formatThreadReply(articles: ClusterArticle[]): string {
 
   let toot = `${prefix}${title}\n\n${feedName}: ${link}`;
 
-  // Add other sources if multiple
+  // Add other sources if multiple, deduplicating by link
   if (sourceCount > 1) {
+    const seenLinks = new Set<string>([link]);
     const otherSources = articles
       .filter((a) => a.id !== primary.id && a.feedKey !== primary.feedKey)
+      .filter((a) => {
+        const l = a.article.link || "";
+        if (seenLinks.has(l)) return false;
+        seenLinks.add(l);
+        return true;
+      })
       .slice(0, 2); // Limit to 2 additional sources
     for (const src of otherSources) {
       const srcLine = `\n${src.feedKey || "unbekannt"}: ${src.article.link || ""}`;
