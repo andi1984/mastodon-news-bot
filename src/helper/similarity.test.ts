@@ -170,7 +170,10 @@ describe("storySimilarity — same story detection", () => {
 });
 
 describe("clusterArticles", () => {
-  it("clusters 3 articles from 3 feeds about the same story", () => {
+  // Note: We pass useSemanticMatching=false in tests to avoid API calls
+  // and test the Jaccard-only fallback behavior
+
+  it("clusters 3 articles from 3 feeds about the same story", async () => {
     const now = new Date("2024-06-15T10:00:00Z");
     const articles: ClusterArticle[] = [
       makeArticle({
@@ -193,13 +196,13 @@ describe("clusterArticles", () => {
       }),
     ];
 
-    const clusters = clusterArticles(articles, 0.4);
+    const clusters = await clusterArticles(articles, 0.4, false);
     expect(clusters.size).toBe(1);
     const allClusters = Array.from(clusters.values());
     expect(allClusters[0]!.length).toBe(3);
   });
 
-  it("does not cluster articles from the same feed", () => {
+  it("does not cluster articles from the same feed", async () => {
     const now = new Date("2024-06-15T10:00:00Z");
     const articles: ClusterArticle[] = [
       makeArticle({
@@ -216,11 +219,11 @@ describe("clusterArticles", () => {
       }),
     ];
 
-    const clusters = clusterArticles(articles, 0.4);
+    const clusters = await clusterArticles(articles, 0.4, false);
     expect(clusters.size).toBe(2);
   });
 
-  it("keeps unrelated stories in separate clusters", () => {
+  it("keeps unrelated stories in separate clusters", async () => {
     const now = new Date("2024-06-15T10:00:00Z");
     const articles: ClusterArticle[] = [
       makeArticle({
@@ -237,11 +240,11 @@ describe("clusterArticles", () => {
       }),
     ];
 
-    const clusters = clusterArticles(articles, 0.4);
+    const clusters = await clusterArticles(articles, 0.4, false);
     expect(clusters.size).toBe(2);
   });
 
-  it("returns each article in its own cluster when none are similar", () => {
+  it("returns each article in its own cluster when none are similar", async () => {
     const now = new Date("2024-06-15T10:00:00Z");
     const articles: ClusterArticle[] = [
       makeArticle({
@@ -264,7 +267,7 @@ describe("clusterArticles", () => {
       }),
     ];
 
-    const clusters = clusterArticles(articles, 0.4);
+    const clusters = await clusterArticles(articles, 0.4, false);
     expect(clusters.size).toBe(3);
     // Each cluster has exactly one article
     for (const [, cluster] of clusters) {
@@ -272,7 +275,7 @@ describe("clusterArticles", () => {
     }
   });
 
-  it("clusters articles from different feeds with differing titles but similar descriptions", () => {
+  it("clusters articles from different feeds with differing titles but similar descriptions", async () => {
     // Regression: two sources covered the same road accident but with headlines
     // that share almost no tokens. Without description-based similarity they would
     // end up in separate clusters and both get posted.
@@ -296,13 +299,13 @@ describe("clusterArticles", () => {
       }),
     ];
 
-    const clusters = clusterArticles(articles, 0.4);
+    const clusters = await clusterArticles(articles, 0.4, false);
     expect(clusters.size).toBe(1);
     const allArticles = Array.from(clusters.values())[0]!;
     expect(allArticles.length).toBe(2);
   });
 
-  it("returns a single-article cluster for a single input", () => {
+  it("returns a single-article cluster for a single input", async () => {
     const articles: ClusterArticle[] = [
       makeArticle({
         id: "1",
@@ -311,7 +314,7 @@ describe("clusterArticles", () => {
       }),
     ];
 
-    const clusters = clusterArticles(articles, 0.4);
+    const clusters = await clusterArticles(articles, 0.4, false);
     expect(clusters.size).toBe(1);
     const cluster = Array.from(clusters.values())[0]!;
     expect(cluster.length).toBe(1);

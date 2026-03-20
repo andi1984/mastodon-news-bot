@@ -1,4 +1,8 @@
 import type { FeedItem } from "./rssFeedItem2Toot.js";
+import {
+  batchSemanticSimilarity,
+  SemanticPair,
+} from "./semanticSimilarity.js";
 
 export type ClusterArticle = {
   id: string;
@@ -7,6 +11,11 @@ export type ClusterArticle = {
   pubDate: string | undefined;
   score: number;
 };
+
+// Thresholds for hybrid matching
+const JACCARD_DEFINITE_MATCH = 0.4; // Above this: definitely same story (no AI needed)
+const JACCARD_UNCERTAIN_LOW = 0.12; // Below this: definitely different (no AI needed)
+const SEMANTIC_MATCH_THRESHOLD = 0.7; // Semantic score needed to cluster
 
 // Common German stopwords
 const STOPWORDS = new Set([
@@ -80,10 +89,11 @@ export function storySimilarity(
   return 0.7 * jaccard + 0.3 * timeSim;
 }
 
-export function clusterArticles(
+export async function clusterArticles(
   articles: ClusterArticle[],
-  threshold = 0.4
-): Map<string, ClusterArticle[]> {
+  threshold = 0.4,
+  useSemanticMatching = true
+): Promise<Map<string, ClusterArticle[]>> {
   const n = articles.length;
   // Union-Find
   const parent = new Array(n);
@@ -103,7 +113,10 @@ export function clusterArticles(
     if (ra !== rb) parent[ra] = rb;
   }
 
-  // Compare all cross-feed pairs
+  // Collect pairs for semantic matching (uncertain zone)
+  const uncertainPairs: SemanticPair[] = [];
+
+  // First pass: Jaccard similarity (fast, free)
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
       // Skip same-feed pairs — never cluster articles from the same feed
@@ -129,8 +142,50 @@ export function clusterArticles(
       const descB = (articles[j].article.contentSnippet ?? "").slice(0, 500);
 
       const sim = storySimilarity(titleA, titleB, dateA, dateB, descA, descB);
-      if (sim >= threshold) {
+
+      if (sim >= JACCARD_DEFINITE_MATCH) {
+        // Definite match - cluster immediately
         union(i, j);
+      } else if (useSemanticMatching && sim >= JACCARD_UNCERTAIN_LOW) {
+        // Uncertain zone - queue for semantic matching
+        uncertainPairs.push({
+          indexA: i,
+          indexB: j,
+          titleA,
+          titleB,
+        });
+      }
+      // Below JACCARD_UNCERTAIN_LOW: definitely different, skip
+    }
+  }
+
+  // Second pass: Semantic matching for uncertain pairs (uses AI budget)
+  if (uncertainPairs.length > 0 && useSemanticMatching) {
+    console.log(
+      `Clustering: ${uncertainPairs.length} uncertain pairs queued for semantic matching`
+    );
+
+    // Batch in groups of 20 to keep API calls manageable
+    const BATCH_SIZE = 20;
+    for (let start = 0; start < uncertainPairs.length; start += BATCH_SIZE) {
+      const batch = uncertainPairs.slice(start, start + BATCH_SIZE);
+      const results = await batchSemanticSimilarity(batch);
+
+      for (const result of results) {
+        if (result.score >= SEMANTIC_MATCH_THRESHOLD) {
+          union(result.indexA, result.indexB);
+          console.log(
+            `Semantic match: "${articles[result.indexA].article.title?.slice(0, 40)}..." ↔ "${articles[result.indexB].article.title?.slice(0, 40)}..." (score=${result.score.toFixed(2)})`
+          );
+        }
+      }
+
+      // If batch returned empty (budget exceeded), stop trying
+      if (results.length === 0 && batch.length > 0) {
+        console.log(
+          "Clustering: semantic matching unavailable, using Jaccard-only for remaining pairs"
+        );
+        break;
       }
     }
   }

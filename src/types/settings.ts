@@ -15,6 +15,18 @@ export type RegionalRelevanceSettings = {
   };
 };
 
+export type SemanticSimilaritySettings = {
+  enabled: boolean;
+  /** Jaccard score above which we skip semantic check (definite match) */
+  jaccard_definite_match?: number;
+  /** Jaccard score below which we skip semantic check (definite mismatch) */
+  jaccard_uncertain_low?: number;
+  /** Semantic score needed to consider articles the same story */
+  match_threshold?: number;
+  /** Max pairs to check per batch (controls API costs) */
+  max_pairs_per_batch?: number;
+};
+
 export type Settings = {
   username: string;
   hashtags: string[];
@@ -31,6 +43,7 @@ export type Settings = {
   breaking_news_time_window_hours?: number;
   breaking_news_priority_boost?: number;
   regional_relevance?: RegionalRelevanceSettings;
+  semantic_similarity?: SemanticSimilaritySettings;
   qa_enabled?: boolean;
   qa_max_results?: number;
   qa_min_text_length?: number;

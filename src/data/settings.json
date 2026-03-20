@@ -126,6 +126,13 @@
       "international": 0.6
     }
   },
+  "semantic_similarity": {
+    "enabled": true,
+    "jaccard_definite_match": 0.4,
+    "jaccard_uncertain_low": 0.12,
+    "match_threshold": 0.7,
+    "max_pairs_per_batch": 20
+  },
   "cw_mapping": [
     {
       "label": "Gewalt",

@@ -1,7 +1,9 @@
 import createClient from "./db.js";
 import { tokenize, jaccardSimilarity } from "./similarity.js";
-import { hasAiBudget, logAiUsage } from "./costTracker.js";
-import Anthropic from "@anthropic-ai/sdk";
+import {
+  batchSemanticSimilarity,
+  SemanticPair,
+} from "./semanticSimilarity.js";
 
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
@@ -35,66 +37,7 @@ const MAX_STORY_TOKENS = 150; // Prevent unbounded token array growth
 // AI matching thresholds - only use AI when token score is uncertain
 const AI_UNCERTAIN_LOW = 0.15; // Below this: definitely different stories
 const AI_UNCERTAIN_HIGH = STORY_SIMILARITY_THRESHOLD; // Above this: definitely same story
-
-const AI_SIMILARITY_PROMPT = `Du vergleichst zwei Nachrichtenartikel und entscheidest, ob sie über dasselbe Ereignis berichten.
-
-Gleiche Geschichte = selbes Ereignis, selber Ort, selbe Personen (auch wenn unterschiedlich formuliert)
-Verschiedene Geschichte = anderes Ereignis, anderer Ort, oder anderes Thema
-
-Antworte NUR mit "same" oder "different". Keine Erklärung.`;
-
-/**
- * Use AI to determine if two articles are about the same story.
- * Only called when token-based matching is uncertain.
- */
-async function aiCheckSimilarity(
-  articleTitle: string,
-  storyTitle: string
-): Promise<boolean | null> {
-  const apiKey = process.env.CLAUDE_API_KEY;
-  if (!apiKey) return null;
-
-  try {
-    if (!(await hasAiBudget())) {
-      console.log("Story AI: budget exceeded, skipping AI check");
-      return null;
-    }
-
-    const client = new Anthropic({ apiKey });
-    const response = await client.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 10,
-      system: AI_SIMILARITY_PROMPT,
-      messages: [
-        {
-          role: "user",
-          content: `Artikel 1: "${articleTitle}"\nArtikel 2: "${storyTitle}"`,
-        },
-      ],
-    });
-
-    logAiUsage(
-      "story_similarity",
-      response.usage.input_tokens,
-      response.usage.output_tokens
-    );
-
-    const text =
-      response.content[0].type === "text"
-        ? response.content[0].text.toLowerCase().trim()
-        : "";
-
-    const isSame = text.includes("same");
-    console.log(
-      `Story AI: "${articleTitle.slice(0, 40)}..." vs "${storyTitle.slice(0, 40)}..." → ${isSame ? "SAME" : "DIFFERENT"}`
-    );
-
-    return isSame;
-  } catch (err) {
-    console.error(`Story AI check failed: ${err}`);
-    return null;
-  }
-}
+const SEMANTIC_MATCH_THRESHOLD = 0.7; // Semantic score needed to consider a match
 
 /**
  * Find an existing story that matches the given article, or return null.
@@ -160,23 +103,38 @@ export async function findMatchingStory(
     return bestMatch;
   }
 
-  // Check uncertain candidates with AI (limit to top 3 by score to save budget)
+  // Check uncertain candidates with batch semantic similarity (limit to top 5 by score)
   if (uncertainCandidates.length > 0) {
     uncertainCandidates.sort((a, b) => b.score - a.score);
-    const toCheck = uncertainCandidates.slice(0, 3);
+    const toCheck = uncertainCandidates.slice(0, 5);
 
-    for (const candidate of toCheck) {
-      const aiResult = await aiCheckSimilarity(
-        article.title,
-        candidate.story.primary_title
-      );
+    // Build batch request
+    const pairs: SemanticPair[] = toCheck.map((candidate, idx) => ({
+      indexA: idx,
+      indexB: idx, // We use indexA to track which candidate
+      titleA: article.title,
+      titleB: candidate.story.primary_title,
+    }));
 
-      if (aiResult === true) {
-        console.log(
-          `Article "${article.title.slice(0, 50)}..." matches story "${candidate.story.primary_title.slice(0, 50)}..." (AI confirmed, token score=${candidate.score.toFixed(3)})`
-        );
-        return candidate.story;
+    const semanticResults = await batchSemanticSimilarity(pairs);
+
+    // Find best semantic match above threshold
+    let bestSemanticMatch: StoryRecord | null = null;
+    let bestSemanticScore = 0;
+
+    for (const result of semanticResults) {
+      if (result.score >= SEMANTIC_MATCH_THRESHOLD && result.score > bestSemanticScore) {
+        bestSemanticScore = result.score;
+        bestSemanticMatch = toCheck[result.indexA].story;
       }
+    }
+
+    if (bestSemanticMatch) {
+      const tokenScore = toCheck.find(c => c.story.id === bestSemanticMatch!.id)?.score ?? 0;
+      console.log(
+        `Article "${article.title.slice(0, 50)}..." matches story "${bestSemanticMatch.primary_title.slice(0, 50)}..." (semantic=${bestSemanticScore.toFixed(2)}, token=${tokenScore.toFixed(3)})`
+      );
+      return bestSemanticMatch;
     }
   }
 

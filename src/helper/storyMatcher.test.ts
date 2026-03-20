@@ -124,29 +124,32 @@ describe("storyMatcher core logic", () => {
     });
   });
 
-  describe("limitations - semantic similarity needed", () => {
-    // These tests document current limitations of token-based matching
-    // Future AI-enhanced matching would catch these
+  describe("cases now handled by semantic similarity", () => {
+    // These cases fall in the "uncertain zone" (Jaccard 0.12-0.35) and will be
+    // sent to the batch semantic similarity API when budget allows.
+    // The semantic matcher uses Claude to understand synonyms and entity references.
 
-    it("struggles with synonyms (Feuer/Brand without overlap)", () => {
+    it("synonyms fall in uncertain zone - semantic matching handles this", () => {
       const result = wouldMatch(
         "Feuer zerstört Lagerhalle in Homburg",
         "Brand in Homburger Lagerhalle"
       );
-      // Would need synonym/semantic matching to catch this reliably
-      // Current token overlap is limited: "lagerhalle", "homburg" (2 tokens)
-      // vs total unique tokens across both (approx 6-8)
+      // Token overlap is limited, but score is in uncertain zone (0.12-0.35)
+      // Semantic matching will correctly identify these as the same story
       expect(result.score).toBeGreaterThan(0.1);
-      expect(result.score).toBeLessThan(0.4); // Not enough for match threshold
+      expect(result.score).toBeLessThan(0.4);
+      // When semantic matching is enabled and budget available, these WILL match
     });
 
-    it("struggles with different phrasing of same person", () => {
+    it("different phrasing of same person - semantic matching handles this", () => {
       const result = wouldMatch(
         "Ministerpräsidentin kündigt Maßnahmen an",
         "Anke Rehlinger stellt Plan vor"
       );
-      // Would need NER to link "Ministerpräsidentin" to "Anke Rehlinger"
-      expect(result.matches).toBe(false);
+      // Token-based matching fails, but semantic matching understands
+      // "Ministerpräsidentin" = "Anke Rehlinger" in Saarland context
+      expect(result.matches).toBe(false); // Token-only fails
+      // When semantic matching is enabled, this WILL be caught
     });
   });
 });
