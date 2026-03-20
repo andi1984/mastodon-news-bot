@@ -1,7 +1,23 @@
 import rssFeedItem2Toot, { FeedItem } from "./rssFeedItem2Toot.js";
 import { ClusterArticle, isBreakingNews, pickPrimaryArticle } from "./similarity.js";
+import { getTopicEmoji } from "./engagementEnhancer.js";
 
 const MASTODON_CHAR_LIMIT = 500;
+
+/**
+ * Convert hashtag to CamelCase for accessibility.
+ * Screen readers can't parse lowercase hashtags properly.
+ * e.g., "saarlandnews" → "SaarlandNews"
+ */
+function toCamelCaseHashtag(tag: string): string {
+  // If already has uppercase letters, assume it's intentional
+  if (/[A-Z]/.test(tag)) return tag;
+  // Split on common separators and capitalize each word
+  return tag
+    .split(/[-_\s]+/)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join("");
+}
 
 export type ClusterFormatOptions = {
   feedPriorities: Record<string, number>;
@@ -42,17 +58,21 @@ export function formatClusterToot(
   const creator = primary.article.creator || primary.article["dc:creator"];
   const title = primary.article.title || "";
 
-  // Build hashtags from the primary article's feed
+  // Build hashtags from the primary article's feed (CamelCase for accessibility)
   const specificHashtags =
     primary.feedKey && feedSpecificHashtags?.[primary.feedKey];
   const hashtags = [...feedHashtags, ...(specificHashtags || [])];
-  if (breaking) hashtags.push("eilmeldung");
-  const hashtagStr = hashtags.map((tag) => ` #${tag}`).join("");
+  if (breaking) hashtags.push("Eilmeldung");
+  const hashtagStr = hashtags
+    .map((tag) => `#${toCamelCaseHashtag(tag)}`)
+    .join(" ");
 
-  // Build title line
-  const prefix = breaking ? "EILMELDUNG: " : "";
-  const creatorStr = creator ? `, ${creator}` : "";
-  const titleLine = `${prefix}${title}${creatorStr}${hashtagStr}`;
+  // Build title line (hashtags moved to footer for better readability)
+  const emoji = getTopicEmoji(title);
+  const emojiPrefix = emoji ? `${emoji} ` : "";
+  const breakingPrefix = breaking ? "EILMELDUNG: " : "";
+  const creatorStr = creator ? ` (${creator})` : "";
+  const titleLine = `${emojiPrefix}${breakingPrefix}${title}${creatorStr}`;
 
   // Build sources block
   const sources = cluster.map((a) => {
@@ -71,13 +91,17 @@ export function formatClusterToot(
   const sourcesHeader = "\n\nQuellen:";
   const sourceLines = uniqueSources.map((s) => `\n${s.feedName}: ${s.link}`);
 
-  // Build toot, truncating sources if needed to fit limit
+  // Hashtags in footer (best practice for accessibility/readability)
+  const hashtagFooter = `\n\n${hashtagStr}`;
+
+  // Build toot: title + sources + hashtags footer
   let toot = titleLine + sourcesHeader;
   for (const line of sourceLines) {
-    if (toot.length + line.length <= MASTODON_CHAR_LIMIT) {
+    if (toot.length + line.length + hashtagFooter.length <= MASTODON_CHAR_LIMIT) {
       toot += line;
     }
   }
+  toot += hashtagFooter;
 
   return toot;
 }

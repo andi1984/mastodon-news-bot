@@ -43,12 +43,12 @@ describe("formatClusterToot", () => {
       }),
     ];
     const result = formatClusterToot(cluster, defaultOptions);
-    // Should match rssFeedItem2Toot format: title, creator #hashtags\n\nlink
+    // Should match rssFeedItem2Toot format with CamelCase hashtags in footer
     expect(result).toContain("Feuer in Saarbrücken");
     expect(result).toContain("Max Mustermann");
-    expect(result).toContain("#news");
-    expect(result).toContain("#saarlandnews");
-    expect(result).toContain("#extra");
+    expect(result).toContain("#News");
+    expect(result).toContain("#Saarlandnews");
+    expect(result).toContain("#Extra");
     expect(result).toContain("https://example.com/1");
   });
 
@@ -103,8 +103,9 @@ describe("formatClusterToot", () => {
       }),
     ];
     const result = formatClusterToot(cluster, defaultOptions);
-    expect(result).toMatch(/^EILMELDUNG:/);
-    expect(result).toContain("#eilmeldung");
+    // Emoji may be prepended, so check for EILMELDUNG: anywhere near start
+    expect(result).toMatch(/^.{0,5}EILMELDUNG:/);
+    expect(result).toContain("#Eilmeldung");
     expect(result).toContain("Quellen:");
   });
 

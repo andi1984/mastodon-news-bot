@@ -106,6 +106,8 @@
   "qa_min_text_length": 10,
   "qa_no_results_text": "Leider habe ich dazu keine passenden Nachrichten gefunden. Versuch es gerne mit anderen Suchbegriffen!",
   "qa_header_text": "Hier sind passende Nachrichten:",
+  "poll_enabled": true,
+  "poll_chance": 0.15,
   "regional_relevance": {
     "enabled": true,
     "always_local_feeds": [

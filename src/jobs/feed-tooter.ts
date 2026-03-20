@@ -12,6 +12,7 @@ import {
 import { formatClusterToot } from "../helper/clusterFormatter.js";
 import { scoreRegionalRelevance } from "../helper/regionalRelevance.js";
 import { markStoryTooted, getStoryTootId } from "../helper/storyMatcher.js";
+import { analyzeForPoll, PollSuggestion } from "../helper/engagementEnhancer.js";
 
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
@@ -29,6 +30,8 @@ const BREAKING_NEWS_BOOST =
   (settings as any).breaking_news_priority_boost ?? 2.0;
 const STORY_THREADING_ENABLED =
   (settings as any).story_threading_enabled ?? true;
+const POLL_ENABLED = (settings as any).poll_enabled ?? true;
+const POLL_CHANCE = (settings as any).poll_chance ?? 0.15; // 15% of eligible posts
 
 function scoreFeedItem(
   feedKey: string | undefined,
@@ -309,6 +312,8 @@ type StoryInfo = {
   const mastoClient = await getInstance();
 
   // 8. Post new stories
+  let pollPostedThisRun = false; // Limit to one poll per run
+
   for (const story of batch) {
     try {
       const primary = pickPrimaryArticle(story.articles, FEED_PRIORITIES);
@@ -321,32 +326,77 @@ type StoryInfo = {
         breakingNewsTimeWindowHours: BREAKING_NEWS_TIME_WINDOW,
       });
 
-      // Try to fetch and upload an image
-      let mediaIds: string[] | undefined;
-      const enclosure = (primary.article as any).enclosure;
-      if (enclosure?.url) {
-        try {
-          const imageBlob = await fetchImage(enclosure.url);
-          if (imageBlob) {
-            const attachment = await mastoClient.v2.media.create({
-              file: imageBlob,
-              description: primary.article.title || "",
-            });
-            mediaIds = [attachment.id];
-            console.log(`Image attached: ${enclosure.url}`);
-          }
-        } catch (imgErr) {
-          console.error(`Image upload failed: ${imgErr}`);
+      // Check if this story is suitable for a poll (debatable topic)
+      let pollConfig: PollSuggestion | undefined;
+      if (
+        POLL_ENABLED &&
+        !pollPostedThisRun &&
+        !story.isBreaking && // Don't poll on breaking news
+        Math.random() < POLL_CHANCE
+      ) {
+        const analysis = await analyzeForPoll(
+          primary.article.title || "",
+          primary.feedKey
+        );
+        if (analysis.isDebatable && analysis.poll) {
+          pollConfig = analysis.poll;
+          console.log(`Poll suggested: "${analysis.poll.question}"`);
         }
       }
 
-      const tootResult = await mastoClient.v1.statuses.create({
-        status: tootText,
+      // Try to fetch and upload an image (skip if using poll - Mastodon limitation)
+      let mediaIds: string[] | undefined;
+      if (!pollConfig) {
+        const enclosure = (primary.article as any).enclosure;
+        if (enclosure?.url) {
+          try {
+            const imageBlob = await fetchImage(enclosure.url);
+            if (imageBlob) {
+              // Build descriptive alt text: title + source for better accessibility
+              const sourceName = primary.feedKey || "Nachrichtenquelle";
+              const altText = `${primary.article.title || "Nachrichtenbild"} (Quelle: ${sourceName})`;
+              const attachment = await mastoClient.v2.media.create({
+                file: imageBlob,
+                description: altText.slice(0, 1500), // Mastodon alt text limit
+              });
+              mediaIds = [attachment.id];
+              console.log(`Image attached: ${enclosure.url}`);
+            }
+          } catch (imgErr) {
+            console.error(`Image upload failed: ${imgErr}`);
+          }
+        }
+      }
+
+      // Build the final toot text (add poll question if using poll)
+      const finalText = pollConfig
+        ? `${tootText}\n\n${pollConfig.question}`
+        : tootText;
+
+      // Create status - different call patterns for media vs poll (TypeScript strict types)
+      const baseParams = {
+        status: finalText,
         spoilerText: feed2CW(tootText, settings),
-        visibility: "public",
+        visibility: "public" as const,
         language: "de",
-        ...(mediaIds ? { mediaIds } : {}),
-      });
+      };
+
+      const tootResult = mediaIds
+        ? await mastoClient.v1.statuses.create({ ...baseParams, mediaIds })
+        : pollConfig
+          ? await mastoClient.v1.statuses.create({
+              ...baseParams,
+              poll: {
+                options: pollConfig.options,
+                expiresIn: pollConfig.expiresInSeconds,
+              },
+            })
+          : await mastoClient.v1.statuses.create(baseParams);
+
+      if (pollConfig) {
+        pollPostedThisRun = true;
+        console.log(`Poll posted with ${pollConfig.options.length} options`);
+      }
 
       // Mark story as tooted
       if (story.storyId) {
@@ -370,7 +420,7 @@ type StoryInfo = {
       } else {
         const sourceCount = new Set(story.articles.map((a) => a.feedKey)).size;
         console.log(
-          `Tooted & deleted: ${articleIds.length} articles from ${sourceCount} sources (primary=${primary.feedKey}${story.isBreaking ? ", BREAKING" : ""})`
+          `Tooted & deleted: ${articleIds.length} articles from ${sourceCount} sources (primary=${primary.feedKey}${story.isBreaking ? ", BREAKING" : ""}${pollConfig ? ", WITH POLL" : ""})`
         );
       }
 
@@ -402,9 +452,11 @@ type StoryInfo = {
 
       const replyText = formatThreadReply(articles);
 
+      // Use quotedStatusId instead of inReplyToId for better visibility
+      // Quote posts appear prominently and increase engagement with the original
       await mastoClient.v1.statuses.create({
         status: replyText,
-        inReplyToId: storyInfo.toot_id,
+        quotedStatusId: storyInfo.toot_id,
         visibility: "public",
         language: "de",
       });
