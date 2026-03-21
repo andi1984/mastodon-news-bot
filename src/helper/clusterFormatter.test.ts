@@ -1,4 +1,4 @@
-import { formatClusterToot, ClusterFormatOptions } from "./clusterFormatter.js";
+import { formatClusterToot, ClusterFormatOptions, formatThreadReply } from "./clusterFormatter.js";
 import rssFeedItem2Toot from "./rssFeedItem2Toot.js";
 import { ClusterArticle } from "./similarity.js";
 
@@ -180,5 +180,124 @@ describe("formatClusterToot", () => {
       expect(result).toContain(article.article.title!);
       expect(result).toContain(article.article.link!);
     }
+  });
+});
+
+describe("formatThreadReply", () => {
+  const feedPriorities = { "feed-a": 0.9, "feed-b": 0.5, "feed-c": 0.3 };
+
+  it("basic thread reply with single article", () => {
+    const articles = [
+      makeArticle({
+        id: "1",
+        title: "Update on breaking story",
+        link: "https://a.com/update",
+        feedKey: "feed-a",
+      }),
+    ];
+    const result = formatThreadReply(articles, feedPriorities);
+    expect(result).toContain("Update: Update on breaking story");
+    expect(result).toContain("feed-a: https://a.com/update");
+  });
+
+  it("thread reply with multiple sources shows source count", () => {
+    const articles = [
+      makeArticle({
+        id: "1",
+        title: "Story update",
+        link: "https://a.com/1",
+        feedKey: "feed-a",
+      }),
+      makeArticle({
+        id: "2",
+        title: "Story update v2",
+        link: "https://b.com/2",
+        feedKey: "feed-b",
+      }),
+    ];
+    const result = formatThreadReply(articles, feedPriorities);
+    expect(result).toContain("Update (2 Quellen):");
+    expect(result).toContain("feed-a: https://a.com/1");
+    expect(result).toContain("feed-b: https://b.com/2");
+  });
+
+  it("handles all-duplicate links gracefully (defensive case - feed-tooter filters these upstream)", () => {
+    // Note: In production, feed-tooter.ts skips thread replies entirely when all links
+    // are duplicates. This test covers the defensive behavior if formatThreadReply
+    // is called directly with duplicate links.
+    const originalLinks = ["https://a.com/original"];
+    const articles = [
+      makeArticle({
+        id: "1",
+        title: "Same story different angle",
+        link: "https://a.com/original", // Same link as original!
+        feedKey: "feed-a",
+      }),
+    ];
+    const result = formatThreadReply(articles, feedPriorities, originalLinks);
+    // Should NOT include the link since it's already in the quoted toot
+    expect(result).not.toContain("https://a.com/original");
+    expect(result).toContain("Update: Same story different angle");
+    expect(result).toContain("(feed-a)"); // Source name only, no link
+  });
+
+  it("excludes duplicate links across multiple follow-up articles", () => {
+    const originalLinks = ["https://a.com/original", "https://b.com/original"];
+    const articles = [
+      makeArticle({
+        id: "1",
+        title: "New coverage",
+        link: "https://a.com/original", // Same as original
+        feedKey: "feed-a",
+      }),
+      makeArticle({
+        id: "2",
+        title: "Fresh take",
+        link: "https://c.com/new", // New link
+        feedKey: "feed-c",
+      }),
+    ];
+    const result = formatThreadReply(articles, feedPriorities, originalLinks);
+    // Primary link was excluded, but new link should appear
+    expect(result).not.toContain("https://a.com/original");
+    expect(result).toContain("https://c.com/new");
+    expect(result).toContain("(feed-a)"); // Primary source with no link
+    expect(result).toContain("feed-c: https://c.com/new");
+  });
+
+  it("includes new links not in original toot", () => {
+    const originalLinks = ["https://old.com/1"];
+    const articles = [
+      makeArticle({
+        id: "1",
+        title: "Completely new article",
+        link: "https://new.com/article",
+        feedKey: "feed-a",
+      }),
+    ];
+    const result = formatThreadReply(articles, feedPriorities, originalLinks);
+    expect(result).toContain("https://new.com/article");
+    expect(result).toContain("feed-a: https://new.com/article");
+  });
+
+  it("deduplicates links within follow-up articles", () => {
+    const articles = [
+      makeArticle({
+        id: "1",
+        title: "Article 1",
+        link: "https://shared.com/link",
+        feedKey: "feed-a",
+      }),
+      makeArticle({
+        id: "2",
+        title: "Article 2",
+        link: "https://shared.com/link", // Same link different feed
+        feedKey: "feed-b",
+      }),
+    ];
+    const result = formatThreadReply(articles, feedPriorities);
+    // Link should appear only once
+    const linkMatches = result.match(/https:\/\/shared\.com\/link/g);
+    expect(linkMatches?.length).toBe(1);
   });
 });

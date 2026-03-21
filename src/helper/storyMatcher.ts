@@ -16,6 +16,7 @@ export interface StoryRecord {
   article_count: number;
   tooted: boolean;
   toot_id: string | null;
+  original_links: string[];
   primary_title: string;
   tokens: string[];
 }
@@ -319,11 +320,13 @@ export async function processNewArticles(
 }
 
 /**
- * Mark a story as tooted and store the toot ID.
+ * Mark a story as tooted and store the toot ID and original links.
+ * Original links are stored to prevent duplicate links in quote replies.
  */
 export async function markStoryTooted(
   storyId: string,
-  tootId: string
+  tootId: string,
+  originalLinks: string[] = []
 ): Promise<void> {
   const db = createClient();
 
@@ -332,6 +335,7 @@ export async function markStoryTooted(
     .update({
       tooted: true,
       toot_id: tootId,
+      original_links: originalLinks,
     })
     .eq("id", storyId);
 

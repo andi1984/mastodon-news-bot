@@ -105,3 +105,60 @@ export function formatClusterToot(
 
   return toot;
 }
+
+/**
+ * Format a thread reply for a story follow-up (quote post).
+ * @param articles - The follow-up articles to include
+ * @param feedPriorities - Feed priority map for picking the primary article
+ * @param excludeLinks - Links from the original toot to exclude (prevents duplicates)
+ */
+export function formatThreadReply(
+  articles: ClusterArticle[],
+  feedPriorities: Record<string, number>,
+  excludeLinks: string[] = []
+): string {
+  const primary = pickPrimaryArticle(articles, feedPriorities);
+  const title = primary.article.title || "";
+  const link = primary.article.link || "";
+  const feedName = primary.feedKey || "unbekannt";
+
+  const sourceCount = new Set(articles.map((a) => a.feedKey)).size;
+  const prefix =
+    sourceCount > 1 ? `Update (${sourceCount} Quellen): ` : "Update: ";
+
+  // Track links to exclude (from original toot) and links we've already added
+  const excludedLinksSet = new Set<string>(excludeLinks);
+  const seenLinks = new Set<string>();
+
+  // Start building the toot - only add primary link if not in excluded set
+  let toot: string;
+  if (excludedLinksSet.has(link)) {
+    // Primary link is already in quoted toot - use title only with source name
+    toot = `${prefix}${title}\n\n(${feedName})`;
+  } else {
+    toot = `${prefix}${title}\n\n${feedName}: ${link}`;
+    seenLinks.add(link);
+  }
+
+  // Add other sources if multiple, deduplicating by link and excluding original toot links
+  if (sourceCount > 1) {
+    const otherSources = articles
+      .filter((a) => a.id !== primary.id && a.feedKey !== primary.feedKey)
+      .filter((a) => {
+        const l = a.article.link || "";
+        // Skip if already seen or in excluded links
+        if (seenLinks.has(l) || excludedLinksSet.has(l)) return false;
+        seenLinks.add(l);
+        return true;
+      })
+      .slice(0, 2); // Limit to 2 additional sources
+    for (const src of otherSources) {
+      const srcLine = `\n${src.feedKey || "unbekannt"}: ${src.article.link || ""}`;
+      if (toot.length + srcLine.length <= 500) {
+        toot += srcLine;
+      }
+    }
+  }
+
+  return toot;
+}

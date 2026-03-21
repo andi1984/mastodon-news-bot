@@ -9,7 +9,7 @@ import {
   isBreakingNews,
   ClusterArticle,
 } from "../helper/similarity.js";
-import { formatClusterToot } from "../helper/clusterFormatter.js";
+import { formatClusterToot, formatThreadReply } from "../helper/clusterFormatter.js";
 import { scoreRegionalRelevance } from "../helper/regionalRelevance.js";
 import { markStoryTooted, getStoryTootId } from "../helper/storyMatcher.js";
 import { analyzeForPoll, PollSuggestion } from "../helper/engagementEnhancer.js";
@@ -52,44 +52,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/**
- * Format a thread reply for a story follow-up.
- */
-function formatThreadReply(articles: ClusterArticle[]): string {
-  const primary = pickPrimaryArticle(articles, FEED_PRIORITIES);
-  const title = primary.article.title || "";
-  const link = primary.article.link || "";
-  const feedName = primary.feedKey || "unbekannt";
-
-  const sourceCount = new Set(articles.map((a) => a.feedKey)).size;
-  const prefix =
-    sourceCount > 1 ? `Update (${sourceCount} Quellen): ` : "Update: ";
-
-  let toot = `${prefix}${title}\n\n${feedName}: ${link}`;
-
-  // Add other sources if multiple, deduplicating by link
-  if (sourceCount > 1) {
-    const seenLinks = new Set<string>([link]);
-    const otherSources = articles
-      .filter((a) => a.id !== primary.id && a.feedKey !== primary.feedKey)
-      .filter((a) => {
-        const l = a.article.link || "";
-        if (seenLinks.has(l)) return false;
-        seenLinks.add(l);
-        return true;
-      })
-      .slice(0, 2); // Limit to 2 additional sources
-    for (const src of otherSources) {
-      const srcLine = `\n${src.feedKey || "unbekannt"}: ${src.article.link || ""}`;
-      if (toot.length + srcLine.length <= 500) {
-        toot += srcLine;
-      }
-    }
-  }
-
-  return toot;
-}
-
 type ArticleRow = {
   id: string;
   data: FeedItem & { _feedKey?: string };
@@ -101,6 +63,7 @@ type StoryInfo = {
   id: string;
   tooted: boolean;
   toot_id: string | null;
+  original_links: string[];
 };
 
 (async () => {
@@ -154,7 +117,7 @@ type StoryInfo = {
   if (storyIds.length > 0) {
     const { data: stories } = await db
       .from("stories")
-      .select("id, tooted, toot_id")
+      .select("id, tooted, toot_id, original_links")
       .in("id", storyIds);
 
     if (stories) {
@@ -405,9 +368,12 @@ type StoryInfo = {
         console.log(`Poll posted with ${pollConfig.options.length} options`);
       }
 
-      // Mark story as tooted
+      // Mark story as tooted, storing original links for deduplication in quote replies
       if (story.storyId) {
-        await markStoryTooted(story.storyId, tootResult.id);
+        const originalLinks = story.articles
+          .map((a) => a.article.link)
+          .filter((link): link is string => !!link);
+        await markStoryTooted(story.storyId, tootResult.id, originalLinks);
       }
 
       // Delete articles immediately after successful toot (aggressive cleanup)
@@ -457,7 +423,31 @@ type StoryInfo = {
         score: scoreFeedItem(row.data._feedKey, row.pub_date),
       }));
 
-      const replyText = formatThreadReply(articles);
+      // Check if any articles have new links (not in original toot)
+      const originalLinksSet = new Set(storyInfo.original_links || []);
+      const newLinks = articles
+        .map((a) => a.article.link)
+        .filter((link): link is string => !!link && !originalLinksSet.has(link));
+
+      if (newLinks.length === 0) {
+        // All links are duplicates - no value in posting a quote
+        // Delete these articles silently
+        const articleIds = articles.map((a) => a.id);
+        await db
+          .from(settings.db_table)
+          .delete()
+          .in("id", articleIds);
+        console.log(
+          `Skipped thread reply: ${articleIds.length} articles with duplicate links for story ${storyId.slice(0, 8)}...`
+        );
+        continue;
+      }
+
+      const replyText = formatThreadReply(
+        articles,
+        FEED_PRIORITIES,
+        storyInfo.original_links || []
+      );
 
       // Use quotedStatusId instead of inReplyToId for better visibility
       // Quote posts appear prominently and increase engagement with the original
