@@ -152,7 +152,17 @@ type StoryInfo = {
       }
       followUpGroups.get(article.story_id)!.push(article);
     } else if (storyInfo.tooted) {
-      // Story tooted but threading disabled - delete immediately (no value keeping)
+      // Story tooted but threading disabled - save hash and delete immediately
+      const { data: articleData } = await db
+        .from(settings.db_table)
+        .select("hash")
+        .eq("id", article.id)
+        .single();
+
+      if (articleData?.hash) {
+        await db.from("tooted_hashes").upsert({ hash: articleData.hash }, { onConflict: "hash" });
+      }
+
       const { error } = await db
         .from(settings.db_table)
         .delete()
@@ -376,8 +386,21 @@ type StoryInfo = {
         await markStoryTooted(story.storyId, tootResult.id, originalLinks);
       }
 
-      // Delete articles immediately after successful toot (aggressive cleanup)
+      // Save hashes to tooted_hashes table before deleting (prevents re-tooting)
       const articleIds = story.articles.map((a) => a.id);
+      const { data: articlesToDelete } = await db
+        .from(settings.db_table)
+        .select("hash")
+        .in("id", articleIds);
+
+      if (articlesToDelete && articlesToDelete.length > 0) {
+        const hashRecords = articlesToDelete.map((a: { hash: string }) => ({
+          hash: a.hash,
+        }));
+        await db.from("tooted_hashes").upsert(hashRecords, { onConflict: "hash" });
+      }
+
+      // Delete articles immediately after successful toot (aggressive cleanup)
       const { error: errorOnDelete } = await db
         .from(settings.db_table)
         .delete()
@@ -431,8 +454,20 @@ type StoryInfo = {
 
       if (newLinks.length === 0) {
         // All links are duplicates - no value in posting a quote
-        // Delete these articles silently
+        // Save hashes and delete these articles silently
         const articleIds = articles.map((a) => a.id);
+        const { data: articlesToDelete } = await db
+          .from(settings.db_table)
+          .select("hash")
+          .in("id", articleIds);
+
+        if (articlesToDelete && articlesToDelete.length > 0) {
+          const hashRecords = articlesToDelete.map((a: { hash: string }) => ({
+            hash: a.hash,
+          }));
+          await db.from("tooted_hashes").upsert(hashRecords, { onConflict: "hash" });
+        }
+
         await db
           .from(settings.db_table)
           .delete()
@@ -458,8 +493,21 @@ type StoryInfo = {
         language: "de",
       });
 
-      // Delete articles immediately after successful thread reply
+      // Save hashes to tooted_hashes table before deleting (prevents re-tooting)
       const articleIds = articles.map((a) => a.id);
+      const { data: articlesToDelete } = await db
+        .from(settings.db_table)
+        .select("hash")
+        .in("id", articleIds);
+
+      if (articlesToDelete && articlesToDelete.length > 0) {
+        const hashRecords = articlesToDelete.map((a: { hash: string }) => ({
+          hash: a.hash,
+        }));
+        await db.from("tooted_hashes").upsert(hashRecords, { onConflict: "hash" });
+      }
+
+      // Delete articles immediately after successful thread reply
       await db
         .from(settings.db_table)
         .delete()
@@ -474,7 +522,20 @@ type StoryInfo = {
     } catch (e) {
       console.error(`Failed to post thread reply: ${e}`);
       // Still delete to avoid retry loops (content was problematic anyway)
+      // Also save hashes to prevent re-ingestion
       const articleIds = articleRows.map((r) => r.id);
+      const { data: articlesToDelete } = await db
+        .from(settings.db_table)
+        .select("hash")
+        .in("id", articleIds);
+
+      if (articlesToDelete && articlesToDelete.length > 0) {
+        const hashRecords = articlesToDelete.map((a: { hash: string }) => ({
+          hash: a.hash,
+        }));
+        await db.from("tooted_hashes").upsert(hashRecords, { onConflict: "hash" });
+      }
+
       await db
         .from(settings.db_table)
         .delete()

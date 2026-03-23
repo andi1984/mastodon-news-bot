@@ -12,6 +12,7 @@ const STALE_UNTOOTED_RETENTION_HOURS = settings.min_freshness_hours || 24;
 const TOOTED_STORY_RETENTION_DAYS = (settings as any).story_retention_days ?? 3;
 const UNTOOTED_STORY_RETENTION_DAYS = (settings as any).untooted_story_retention_days ?? 1;
 const AI_USAGE_RETENTION_DAYS = (settings as any).ai_usage_retention_days ?? 14;
+const TOOTED_HASH_RETENTION_DAYS = (settings as any).tooted_hash_retention_days ?? 7;
 const MAX_STORY_TOKENS = 150; // Prune token arrays larger than this
 
 interface CleanupStats {
@@ -21,6 +22,7 @@ interface CleanupStats {
   untootedStories: number;
   orphanedStoryRefs: number;
   aiUsageRows: number;
+  tootedHashes: number;
   prunedStoryTokens: number;
 }
 
@@ -158,6 +160,26 @@ async function cleanupAiUsage(): Promise<number> {
   return data?.length ?? 0;
 }
 
+async function cleanupTootedHashes(): Promise<number> {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - TOOTED_HASH_RETENTION_DAYS);
+
+  const { data, error } = await supabase
+    .from("tooted_hashes")
+    .delete()
+    .lt("created_at", cutoff.toISOString())
+    .select("hash");
+
+  if (error) {
+    // Table might not exist yet - that's ok
+    if (!error.message.includes("does not exist")) {
+      console.error(`Cleanup tooted hashes: ${error.message}`);
+    }
+    return 0;
+  }
+  return data?.length ?? 0;
+}
+
 async function pruneStoryTokens(): Promise<number> {
   // Find stories with oversized token arrays
   const { data: largeStories, error: fetchError } = await supabase
@@ -206,9 +228,10 @@ async function runFullCleanup(): Promise<CleanupStats> {
   ]);
 
   // These depend on stories being cleaned first
-  const [orphanedStoryRefs, aiUsageRows, prunedStoryTokens] = await Promise.all([
+  const [orphanedStoryRefs, aiUsageRows, tootedHashes, prunedStoryTokens] = await Promise.all([
     cleanupOrphanedStoryRefs(),
     cleanupAiUsage(),
+    cleanupTootedHashes(),
     pruneStoryTokens(),
   ]);
 
@@ -219,6 +242,7 @@ async function runFullCleanup(): Promise<CleanupStats> {
     untootedStories,
     orphanedStoryRefs,
     aiUsageRows,
+    tootedHashes,
     prunedStoryTokens,
   };
 }
@@ -231,7 +255,7 @@ async function runFullCleanup(): Promise<CleanupStats> {
   console.log(`Cleanup complete: ${total} items processed`);
   console.log(`  Articles: ${stats.tootedArticles} tooted, ${stats.staleArticles} stale`);
   console.log(`  Stories: ${stats.tootedStories} tooted, ${stats.untootedStories} untooted`);
-  console.log(`  Maintenance: ${stats.orphanedStoryRefs} orphan refs, ${stats.aiUsageRows} AI logs, ${stats.prunedStoryTokens} token arrays pruned`);
+  console.log(`  Maintenance: ${stats.orphanedStoryRefs} orphan refs, ${stats.aiUsageRows} AI logs, ${stats.tootedHashes} old hashes, ${stats.prunedStoryTokens} token arrays pruned`);
 
   if (parentPort) parentPort.postMessage("done");
   else process.exit(0);

@@ -45,23 +45,31 @@ async function processFeedBatch(
 
         if (candidates.length === 0) return;
 
-        // Batch-check which hashes already exist (single query instead of N)
-        const { data: existing, error } = await supabase
-          .from(settings.db_table)
-          .select("hash")
-          .in(
-            "hash",
-            candidates.map((c) => c.hash)
-          );
+        const candidateHashes = candidates.map((c) => c.hash);
 
-        if (error) {
-          console.error(`[${feedKey}] ${error.message}`);
+        // Batch-check which hashes already exist in news table AND tooted_hashes table
+        // This prevents re-tooting items that were deleted after being posted
+        const [newsResult, tootedResult] = await Promise.all([
+          supabase
+            .from(settings.db_table)
+            .select("hash")
+            .in("hash", candidateHashes),
+          supabase
+            .from("tooted_hashes")
+            .select("hash")
+            .in("hash", candidateHashes),
+        ]);
+
+        if (newsResult.error) {
+          console.error(`[${feedKey}] ${newsResult.error.message}`);
           return;
         }
 
-        const existingSet = new Set(
-          (existing ?? []).map((e: { hash: string }) => e.hash)
-        );
+        // Combine hashes from both tables
+        const existingSet = new Set([
+          ...(newsResult.data ?? []).map((e: { hash: string }) => e.hash),
+          ...(tootedResult.data ?? []).map((e: { hash: string }) => e.hash),
+        ]);
         const newData = candidates.filter((c) => !existingSet.has(c.hash));
 
         if (newData.length > 0) {
