@@ -130,28 +130,28 @@ async function findAndCleanDuplicates(): Promise<{
     "verifyCredentials"
   );
 
-  // Fetch recent statuses
+  // Fetch recent statuses using async iterator
   const allStatuses: mastodon.v1.Status[] = [];
-  let maxId: string | undefined;
   const pageSize = 40;
 
-  while (allStatuses.length < LIMIT) {
-    const statuses = await withRetry(
-      () =>
-        client.v1.accounts.$select(account.id).statuses.list({
-          limit: pageSize,
-          maxId,
-          excludeReblogs: true, // Never include boosts
-        }),
-      `fetch page`
-    );
+  try {
+    for await (const statuses of client.v1.accounts.$select(account.id).statuses.list({
+      limit: pageSize,
+      excludeReblogs: true, // Never include boosts
+    })) {
+      allStatuses.push(...statuses);
 
-    if (statuses.length === 0) break;
+      if (allStatuses.length >= LIMIT) break;
 
-    allStatuses.push(...statuses);
-    maxId = statuses[statuses.length - 1].id;
-
-    await sleep(REQUEST_DELAY);
+      await sleep(REQUEST_DELAY);
+    }
+  } catch (err: unknown) {
+    const error = err as { statusCode?: number; message?: string };
+    if (error?.statusCode === 429 || error?.message?.includes("429")) {
+      console.log(`[cleanup-duplicates] Rate limited while fetching, proceeding with ${allStatuses.length} toots`);
+    } else {
+      throw err;
+    }
   }
 
   // Group by normalized content
