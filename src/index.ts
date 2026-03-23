@@ -89,6 +89,12 @@ const bree = new Bree({
       path: path.join(jobsRoot, `mention-replier.${ext}`),
       interval: "5m",
     },
+    // Duplicate toot cleanup - every 31 minutes
+    {
+      name: "cleanup-duplicates",
+      path: path.join(jobsRoot, `cleanup-duplicates.${ext}`),
+      interval: "31m",
+    },
   ],
 });
 

@@ -14,6 +14,7 @@
     "dev": "tsx src/index.ts",
     "start": "node ./scripts/create-env.cjs && node ./dist/index.js",
     "cleanup-replies": "tsx scripts/cleanup-auto-replies.ts",
+    "cleanup-duplicates": "tsx scripts/cleanup-duplicate-toots.ts",
     "daily-digest": "tsx src/jobs/daily-digest.ts",
     "weekly-digest": "tsx src/jobs/weekly-digest.ts",
     "manage-feeds": "tsx scripts/manage-feeds.ts",
