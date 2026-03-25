@@ -122,6 +122,8 @@ jobs:
 
       - name: Update package.json version
         if: steps.check.outputs.has_changes == 'true' && inputs.dry_run == false
+        env:
+          HUSKY: 0
         run: |
           NEW_VERSION="${{ steps.semver.outputs.nextStrict }}"
           npm version $NEW_VERSION --no-git-tag-version
