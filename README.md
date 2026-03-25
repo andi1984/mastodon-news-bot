@@ -22,6 +22,21 @@ A sophisticated, AI-enhanced news aggregation bot for Mastodon that automaticall
 - **Smart Hashtag Generation** - Content-derived hashtags beyond static feed tags
 - **Interactive Q&A** - Responds to mentions with relevant news searches
 
+### Interactive Q&A
+
+Users can ask the bot about recent news by mentioning it:
+
+```
+@saarlandnews Was gibt es Neues zum Thema Verkehr?
+@saarlandnews Any news about the city council?
+```
+
+The bot will search its database for relevant articles and reply with matching results. This feature:
+- Uses full-text search (PostgreSQL) to find articles matching keywords
+- Falls back to AI keyword extraction for complex questions
+- Returns up to 3 relevant articles with links
+- Only searches articles from the past 7 days
+
 ### Content Management
 
 - **Daily & Weekly Digests** - Automated summaries of top stories
