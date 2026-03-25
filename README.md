@@ -2,7 +2,7 @@
 
 A sophisticated, AI-enhanced news aggregation bot for Mastodon that automatically collects, clusters, and posts news from multiple RSS feeds.
 
-**Live Example:** [@saarlandnews](https://mastodon.social/@saarlandnews) - Regional news bot for Saarland, Germany
+**Live Example:** [@saarlandnews@dibbelabb.es](https://dibbelabb.es/@saarlandnews) - Regional news bot for Saarland, Germany
 
 ## Features
 
@@ -116,14 +116,7 @@ CLAUDE_API_KEY=your_claude_api_key  # Optional
 
 Lower priority values = higher priority (posted first).
 
-3. **Set up Supabase tables:**
-
-You'll need these tables:
-- `news` - Stores fetched articles
-- `stories` - Groups related articles
-- `tooted_hashes` - Prevents duplicates
-- `bot_state` - Tracks cooldowns, last toot time
-- `ai_usage` - Tracks AI API costs
+3. **Set up Supabase tables** - See [Database Setup](#database-setup) below.
 
 ### Running
 
@@ -135,6 +128,211 @@ npm run dev
 npm run build
 npm start
 ```
+
+## Database Setup
+
+The bot uses Supabase (PostgreSQL) for persistence. Create a free project at [supabase.com](https://supabase.com) and run these migrations in the SQL Editor.
+
+### Tables Overview
+
+| Table | Purpose |
+|-------|---------|
+| `news` | Stores fetched RSS articles pending posting |
+| `stories` | Groups related articles from different sources |
+| `tooted_hashes` | Tracks posted article hashes to prevent duplicates |
+| `bot_state` | Key-value store for cooldowns, pin tracking, rate limiting |
+| `ai_usage` | Tracks Claude API costs for budget management |
+
+### Migration: Core Tables
+
+Run these in order (stories must exist before news due to foreign key):
+
+```sql
+-- 1. Stories table (groups related articles)
+CREATE TABLE public.stories (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  article_count integer DEFAULT 1,
+  tooted boolean DEFAULT false,
+  toot_id text,
+  primary_title text NOT NULL,
+  tokens text[] DEFAULT '{}'::text[],
+  original_links text[] DEFAULT '{}'::text[],
+  CONSTRAINT stories_pkey PRIMARY KEY (id)
+);
+
+-- 2. News articles table
+CREATE TABLE public.news (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  uuid uuid DEFAULT uuid_generate_v4(),
+  created_at timestamp with time zone DEFAULT now(),
+  tooted boolean DEFAULT false,
+  data jsonb,
+  hash text UNIQUE,
+  pub_date timestamp without time zone,
+  story_id uuid,
+  fts tsvector GENERATED ALWAYS AS (
+    to_tsvector('german'::regconfig,
+      coalesce((data ->> 'title'::text), ''::text) || ' ' ||
+      coalesce((data ->> 'content'::text), ''::text)
+    )
+  ) STORED,
+  CONSTRAINT news_pkey PRIMARY KEY (id),
+  CONSTRAINT news_story_id_fkey FOREIGN KEY (story_id) REFERENCES public.stories(id)
+);
+
+-- Index for full-text search
+CREATE INDEX idx_news_fts ON news USING gin(fts);
+
+-- 3. Tooted hashes (duplicate prevention)
+CREATE TABLE public.tooted_hashes (
+  hash text NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT tooted_hashes_pkey PRIMARY KEY (hash)
+);
+
+-- 4. Bot state (key-value store)
+CREATE TABLE public.bot_state (
+  key text NOT NULL,
+  value jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT bot_state_pkey PRIMARY KEY (key)
+);
+
+-- 5. AI usage tracking
+CREATE TABLE public.ai_usage (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  date_bucket date DEFAULT CURRENT_DATE,
+  source text NOT NULL,
+  input_tokens integer NOT NULL,
+  output_tokens integer NOT NULL,
+  cost_usd numeric NOT NULL,
+  CONSTRAINT ai_usage_pkey PRIMARY KEY (id)
+);
+```
+
+> **Note:** The `fts` column enables PostgreSQL full-text search in German. This powers the Q&A mention feature.
+
+### Migration: Helper Function
+
+```sql
+-- Function to get today's AI cost (used by budget checker)
+CREATE OR REPLACE FUNCTION get_today_ai_cost()
+RETURNS DECIMAL AS $$
+  SELECT COALESCE(SUM(cost_usd), 0)
+  FROM ai_usage
+  WHERE date_bucket = CURRENT_DATE;
+$$ LANGUAGE SQL STABLE;
+```
+
+### Migration: Row Level Security (Optional)
+
+If using RLS, enable it for all tables:
+
+```sql
+-- Enable RLS
+ALTER TABLE news ENABLE ROW LEVEL SECURITY;
+ALTER TABLE stories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tooted_hashes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE bot_state ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ai_usage ENABLE ROW LEVEL SECURITY;
+
+-- Allow service role full access (for the bot)
+CREATE POLICY "Service role full access" ON news
+  FOR ALL USING (auth.role() = 'service_role');
+
+CREATE POLICY "Service role full access" ON stories
+  FOR ALL USING (auth.role() = 'service_role');
+
+CREATE POLICY "Service role full access" ON tooted_hashes
+  FOR ALL USING (auth.role() = 'service_role');
+
+CREATE POLICY "Service role full access" ON bot_state
+  FOR ALL USING (auth.role() = 'service_role');
+
+CREATE POLICY "Service role full access" ON ai_usage
+  FOR ALL USING (auth.role() = 'service_role');
+```
+
+> **Note:** If using RLS, use the `service_role` key (not the `anon` key) in your `.env` file for `SUPABASE_KEY`.
+
+### Schema Reference
+
+#### `news` Table
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | BIGINT | Primary key (auto-increment) |
+| `uuid` | UUID | Secondary unique identifier |
+| `hash` | TEXT | Unique hash of feed URL + title + link |
+| `data` | JSONB | Full RSS item data including `_feedKey` |
+| `pub_date` | TIMESTAMP | Article publication date |
+| `tooted` | BOOLEAN | Whether article has been posted |
+| `story_id` | UUID | Foreign key to `stories` table |
+| `fts` | TSVECTOR | Full-text search index (German) |
+| `created_at` | TIMESTAMPTZ | When article was fetched |
+
+#### `stories` Table
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | UUID | Primary key |
+| `primary_title` | TEXT | Title of the main article |
+| `tokens` | TEXT[] | Tokenized words for similarity matching |
+| `article_count` | INTEGER | Number of articles in this story |
+| `tooted` | BOOLEAN | Whether story has been posted |
+| `toot_id` | TEXT | Mastodon status ID (for threading) |
+| `original_links` | TEXT[] | Links already posted (prevents duplicates in threads) |
+| `created_at` | TIMESTAMPTZ | When story was created |
+| `updated_at` | TIMESTAMPTZ | Last update (new article added) |
+
+#### `bot_state` Table
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `key` | TEXT | Primary key (state identifier) |
+| `value` | JSONB | State data |
+| `created_at` | TIMESTAMPTZ | When state was created |
+| `updated_at` | TIMESTAMPTZ | Last update |
+
+**Common keys:**
+
+| Key | Value Structure | Purpose |
+|-----|-----------------|---------|
+| `cooldown_until` | `{timestamp, reason, toot_id?}` | Post-breaking-news cooldown |
+| `last_toot_at` | `{timestamp}` | Rate limiting between posts |
+| `pinned_toot_<id>` | `{toot_id, pinned_at}` | Track pinned toots for auto-unpin |
+
+#### `ai_usage` Table
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | BIGINT | Primary key (auto-increment) |
+| `source` | TEXT | Feature using AI (`poll_analysis`, `semantic_similarity`, `hashtag_generation`) |
+| `input_tokens` | INTEGER | Tokens sent to Claude |
+| `output_tokens` | INTEGER | Tokens received from Claude |
+| `cost_usd` | NUMERIC | Calculated cost in USD |
+| `date_bucket` | DATE | Date for daily aggregation |
+| `created_at` | TIMESTAMPTZ | Timestamp of API call |
+
+### Verifying Setup
+
+After running migrations, verify with:
+
+```sql
+-- Check all tables exist
+SELECT table_name FROM information_schema.tables
+WHERE table_schema = 'public'
+AND table_name IN ('news', 'stories', 'tooted_hashes', 'bot_state', 'ai_usage');
+
+-- Test the function
+SELECT get_today_ai_cost();
+```
+
+The bot also performs a health check on startup - check logs for "Supabase connection: OK".
 
 ## Configuration Reference
 
@@ -260,7 +458,7 @@ MIT
 
 ## Author
 
-Andreas Sander ([@andi1984](https://mastodon.social/@andi1984))
+Andreas Sander ([@andi1984@dibbelabb.es](https://dibbelabb.es/@andi1984))
 
 ---
 
