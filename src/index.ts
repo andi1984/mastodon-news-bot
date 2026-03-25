@@ -95,6 +95,13 @@ const bree = new Bree({
       path: path.join(jobsRoot, `cleanup-duplicates.${ext}`),
       interval: "31m",
     },
+    // Story thread fixer - twice daily (fuzzy matching, converts similar toots to threads)
+    // Runs at 03:00 and 15:00 to avoid peak hours
+    {
+      name: "story-thread-fixer",
+      path: path.join(jobsRoot, `story-thread-fixer.${ext}`),
+      cron: "0 3,15 * * *",
+    },
   ],
 });
 
