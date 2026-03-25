@@ -46,7 +46,7 @@ const bree = new Bree({
     {
       name: "feed-grabber-night",
       path: path.join(jobsRoot, `feed-grabber.${ext}`),
-      cron: "*/30 22-5 * * *",
+      cron: "*/30 22-23,0-5 * * *",
     },
     // Adaptive tooter - runs every 20 min, decides itself whether to post
     // Smart logic handles:
