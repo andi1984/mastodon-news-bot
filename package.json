@@ -23,7 +23,6 @@
     "typecheck": "tsc --noEmit"
   },
   "author": "Andreas Sander (mail@andi1984.de)",
-  "license": "MIT",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
     "@supabase/supabase-js": "^2.99.3",

@@ -440,10 +440,6 @@ npm test -- similarity      # Run specific test file
 - **Different languages** - Adjust stopwords in `similarity.ts`, prompts in AI helpers
 - **Webhook integration** - Add Discord/Slack notifications for breaking news
 
-## License
-
-MIT
-
 ## Author
 
 Andreas Sander ([@andi1984@dibbelabb.es](https://dibbelabb.es/@andi1984))
