@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { hasAiBudget, logAiUsage } from "./costTracker.js";
+import { parseAiJson } from "./parseAiJson.js";
 
 export interface SemanticPair {
   indexA: number;
@@ -76,7 +77,7 @@ export async function batchSemanticSimilarity(
       response.content[0].type === "text" ? response.content[0].text : "";
 
     // Parse JSON response
-    const parsed: { a: number; b: number; s: number }[] = JSON.parse(text);
+    const parsed = parseAiJson<{ a: number; b: number; s: number }[]>(text);
 
     // Map back to original indices
     const results: SemanticResult[] = [];

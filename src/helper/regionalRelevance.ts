@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { RegionalRelevanceSettings } from "../types/settings.js";
 import { hasAiBudget, logAiUsage } from "./costTracker.js";
+import { parseAiJson } from "./parseAiJson.js";
 
 type RelevanceCategory = "local" | "regional" | "national" | "international";
 
@@ -98,7 +99,7 @@ export async function scoreRegionalRelevance(
 
     const text =
       response.content[0].type === "text" ? response.content[0].text : "";
-    const parsed: { i: number; c: RelevanceCategory }[] = JSON.parse(text);
+    const parsed = parseAiJson<{ i: number; c: RelevanceCategory }[]>(text);
 
     const counts: Record<string, number> = {
       local: 0,

@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { hasAiBudget, logAiUsage } from "./costTracker.js";
+import { parseAiJson } from "./parseAiJson.js";
 
 /**
  * Topic emoji mapping - one subtle emoji prefix based on content category.
@@ -126,7 +127,7 @@ export async function analyzeForPoll(
 
     const text =
       response.content[0].type === "text" ? response.content[0].text : "";
-    const parsed = JSON.parse(text);
+    const parsed = parseAiJson<{ debatable?: boolean; poll?: { q?: string; opts?: string[] } }>(text);
 
     if (!parsed.debatable) {
       return { isDebatable: false };

@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { hasAiBudget, logAiUsage } from "./costTracker.js";
+import { parseAiJson } from "./parseAiJson.js";
 
 /**
  * Topic keywords → hashtags mapping
@@ -148,7 +149,7 @@ async function getAiHashtags(
 
     const text =
       response.content[0].type === "text" ? response.content[0].text : "";
-    const parsed = JSON.parse(text);
+    const parsed = parseAiJson<{ tags?: unknown[] }>(text);
 
     if (Array.isArray(parsed.tags)) {
       // Clean and validate tags
