@@ -439,6 +439,7 @@ npm run dev
 - TypeScript strict mode
 - ESM modules
 - Prettier for formatting
+- [Conventional Commits](https://www.conventionalcommits.org/) for commit messages (enforced by commitlint)
 
 ### Testing
 

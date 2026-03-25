@@ -1,9 +1,13 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (no tag/release created)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -35,27 +39,174 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Generate changelog
-        id: changelog
+      - name: Calculate next version
+        id: version
         run: |
-          # Get previous tag
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          # Get current version from package.json
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          echo "Current version: $CURRENT_VERSION"
 
-          if [ -z "$PREV_TAG" ]; then
-            echo "No previous tag found, using all commits"
-            CHANGELOG=$(git log --pretty=format:"- %s (%h)" HEAD)
+          # Get last tag or use initial commit
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          if [ -z "$LAST_TAG" ]; then
+            echo "No previous tag found, checking all commits"
+            COMMITS=$(git log --pretty=format:"%s" HEAD)
           else
-            echo "Generating changelog from $PREV_TAG to HEAD"
-            CHANGELOG=$(git log --pretty=format:"- %s (%h)" $PREV_TAG..HEAD)
+            echo "Checking commits since $LAST_TAG"
+            COMMITS=$(git log --pretty=format:"%s" $LAST_TAG..HEAD)
           fi
 
-          # Write to file for multiline output
-          echo "$CHANGELOG" > changelog.txt
+          # Parse version
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
 
-      - name: Create Release
+          # Determine bump type from conventional commits
+          BUMP_TYPE="none"
+
+          echo "$COMMITS" | while read -r commit; do
+            echo "Analyzing: $commit"
+          done
+
+          # Check for breaking changes (major bump)
+          if echo "$COMMITS" | grep -qE "^[a-z]+(\(.+\))?!:|BREAKING CHANGE:"; then
+            BUMP_TYPE="major"
+          # Check for features (minor bump)
+          elif echo "$COMMITS" | grep -qE "^feat(\(.+\))?:"; then
+            BUMP_TYPE="minor"
+          # Check for fixes (patch bump)
+          elif echo "$COMMITS" | grep -qE "^fix(\(.+\))?:"; then
+            BUMP_TYPE="patch"
+          # Check for any other conventional commit types (patch bump)
+          elif echo "$COMMITS" | grep -qE "^(docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?:"; then
+            BUMP_TYPE="patch"
+          fi
+
+          echo "Bump type: $BUMP_TYPE"
+
+          # Calculate new version
+          case $BUMP_TYPE in
+            major)
+              NEW_VERSION="$((MAJOR + 1)).0.0"
+              ;;
+            minor)
+              NEW_VERSION="${MAJOR}.$((MINOR + 1)).0"
+              ;;
+            patch)
+              NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
+              ;;
+            none)
+              echo "No conventional commits found since last release"
+              echo "has_changes=false" >> $GITHUB_OUTPUT
+              exit 0
+              ;;
+          esac
+
+          echo "New version: $NEW_VERSION"
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "has_changes=true" >> $GITHUB_OUTPUT
+          echo "bump_type=$BUMP_TYPE" >> $GITHUB_OUTPUT
+
+      - name: Generate changelog
+        id: changelog
+        if: steps.version.outputs.has_changes == 'true'
+        run: |
+          NEW_VERSION="${{ steps.version.outputs.new_version }}"
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          echo "# Release v$NEW_VERSION" > changelog.md
+          echo "" >> changelog.md
+
+          if [ -z "$LAST_TAG" ]; then
+            COMMITS=$(git log --pretty=format:"%s|%h" HEAD)
+          else
+            COMMITS=$(git log --pretty=format:"%s|%h" $LAST_TAG..HEAD)
+          fi
+
+          # Categorize commits
+          declare -a BREAKING=()
+          declare -a FEATURES=()
+          declare -a FIXES=()
+          declare -a OTHERS=()
+
+          while IFS='|' read -r subject hash; do
+            if [[ "$subject" =~ ^[a-z]+\(.+\)?!: ]] || [[ "$subject" =~ BREAKING\ CHANGE: ]]; then
+              BREAKING+=("- $subject ($hash)")
+            elif [[ "$subject" =~ ^feat(\(.+\))?: ]]; then
+              FEATURES+=("- $subject ($hash)")
+            elif [[ "$subject" =~ ^fix(\(.+\))?: ]]; then
+              FIXES+=("- $subject ($hash)")
+            elif [[ "$subject" =~ ^(docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?: ]]; then
+              OTHERS+=("- $subject ($hash)")
+            fi
+          done <<< "$COMMITS"
+
+          if [ ${#BREAKING[@]} -gt 0 ]; then
+            echo "## Breaking Changes" >> changelog.md
+            printf '%s\n' "${BREAKING[@]}" >> changelog.md
+            echo "" >> changelog.md
+          fi
+
+          if [ ${#FEATURES[@]} -gt 0 ]; then
+            echo "## Features" >> changelog.md
+            printf '%s\n' "${FEATURES[@]}" >> changelog.md
+            echo "" >> changelog.md
+          fi
+
+          if [ ${#FIXES[@]} -gt 0 ]; then
+            echo "## Bug Fixes" >> changelog.md
+            printf '%s\n' "${FIXES[@]}" >> changelog.md
+            echo "" >> changelog.md
+          fi
+
+          if [ ${#OTHERS[@]} -gt 0 ]; then
+            echo "## Other Changes" >> changelog.md
+            printf '%s\n' "${OTHERS[@]}" >> changelog.md
+            echo "" >> changelog.md
+          fi
+
+          cat changelog.md
+
+      - name: Update package.json version
+        if: steps.version.outputs.has_changes == 'true' && inputs.dry_run == false
+        run: |
+          NEW_VERSION="${{ steps.version.outputs.new_version }}"
+          npm version $NEW_VERSION --no-git-tag-version
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "chore(release): v$NEW_VERSION"
+          git push
+
+      - name: Create tag and release
+        if: steps.version.outputs.has_changes == 'true' && inputs.dry_run == false
+        run: |
+          NEW_VERSION="${{ steps.version.outputs.new_version }}"
+          git tag "v$NEW_VERSION"
+          git push origin "v$NEW_VERSION"
+
+      - name: Create GitHub Release
+        if: steps.version.outputs.has_changes == 'true' && inputs.dry_run == false
         uses: softprops/action-gh-release@v2
         with:
-          body_path: changelog.txt
-          generate_release_notes: true
+          tag_name: v${{ steps.version.outputs.new_version }}
+          body_path: changelog.md
+          generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Dry run summary
+        if: inputs.dry_run == true
+        run: |
+          echo "## Dry Run Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.version.outputs.has_changes }}" == "true" ]; then
+            echo "**Would release version:** v${{ steps.version.outputs.new_version }}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Bump type:** ${{ steps.version.outputs.bump_type }}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Changelog" >> $GITHUB_STEP_SUMMARY
+            cat changelog.md >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No changes to release" >> $GITHUB_STEP_SUMMARY
+          fi

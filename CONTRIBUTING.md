@@ -62,9 +62,50 @@ npm run typecheck     # Type checking only
 
 ### Commit Messages
 
-- Use present tense ("Add feature" not "Added feature")
-- Keep the first line under 72 characters
-- Reference issues when relevant ("Fix #123")
+This project uses [Conventional Commits](https://www.conventionalcommits.org/). All commits must follow this format:
+
+```
+<type>(<optional scope>): <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+**Allowed types:**
+
+| Type | Description |
+|------|-------------|
+| `feat` | New feature |
+| `fix` | Bug fix |
+| `docs` | Documentation only |
+| `style` | Code style (formatting, etc.) |
+| `refactor` | Code change that neither fixes a bug nor adds a feature |
+| `perf` | Performance improvement |
+| `test` | Adding or updating tests |
+| `build` | Build system or external dependencies |
+| `ci` | CI configuration |
+| `chore` | Other changes that don't modify src or test files |
+| `revert` | Reverts a previous commit |
+
+**Examples:**
+
+```bash
+feat: add webhook notifications for breaking news
+fix(rss): handle malformed feed entries gracefully
+docs: update database setup instructions
+refactor(similarity): extract token matching to separate function
+feat!: change API response format  # Breaking change
+```
+
+**Enforcement:**
+
+- **Local:** A pre-commit hook validates your commit messages using commitlint
+- **CI:** Pull requests are checked to ensure all commits follow the convention
+- **Releases:** Version numbers are automatically calculated from commit types:
+  - `feat` = minor version bump (1.0.0 → 1.1.0)
+  - `fix` and others = patch version bump (1.0.0 → 1.0.1)
+  - `!` or `BREAKING CHANGE` = major version bump (1.0.0 → 2.0.0)
 
 ## Project Structure
 
