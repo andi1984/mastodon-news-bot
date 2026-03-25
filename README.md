@@ -79,7 +79,7 @@ src/
 ### Installation
 
 ```bash
-git clone https://github.com/your-username/mastodon-news-bot.git
+git clone https://github.com/andi1984/mastodon-news-bot.git
 cd mastodon-news-bot
 npm install
 ```
@@ -98,23 +98,11 @@ CLAUDE_API_KEY=your_claude_api_key  # Optional
 
 2. **Configure feeds in `src/data/settings.json`:**
 
-```json
-{
-  "username": "yournewsbot",
-  "db_table": "news",
-  "feeds": {
-    "source-name": "https://example.com/feed.rss",
-    "another-source": "https://news.example.org/rss"
-  },
-  "feed_hashtags": ["news", "localnews"],
-  "feed_priorities": {
-    "source-name": 0.3,
-    "another-source": 0.7
-  }
-}
+```bash
+cp src/data/settings.example.json src/data/settings.json
 ```
 
-Lower priority values = higher priority (posted first).
+Edit with your feeds and preferences. See [Configuration Reference](#configuration-reference) for all options. Lower priority values = higher priority (posted first).
 
 3. **Set up Supabase tables** - See [Database Setup](#database-setup) below.
 
@@ -424,7 +412,7 @@ Contributions are welcome! This bot is designed to be adaptable for any regional
 ### Development Setup
 
 ```bash
-git clone https://github.com/your-username/mastodon-news-bot.git
+git clone https://github.com/andi1984/mastodon-news-bot.git
 cd mastodon-news-bot
 npm install
 cp .env.example .env  # Edit with your credentials

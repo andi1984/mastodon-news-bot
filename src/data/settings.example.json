@@ -1,0 +1,75 @@
+{
+  "username": "yournewsbot",
+  "hashtags": [],
+  "db_table": "news",
+  "feeds": {
+    "local-newspaper": "https://example-news.com/feed/",
+    "regional-tv": "https://regional-tv.example/rss",
+    "police-reports": "https://police.example/feed.rss"
+  },
+  "feed_hashtags": ["news", "localnews"],
+  "feed_specific_hashtags": {
+    "local-newspaper": ["localnews"],
+    "police-reports": ["police", "safety"]
+  },
+  "adaptive_tooting": {
+    "normal_batch_size": 2,
+    "breaking_batch_size": 3,
+    "min_minutes_between_toots": 30,
+    "cooldown_hours": 1,
+    "pin_duration_hours": 48
+  },
+  "feed_priorities": {
+    "local-newspaper": 0.1,
+    "regional-tv": 0.3,
+    "police-reports": 0.5
+  },
+  "min_freshness_hours": 24,
+  "similarity_threshold": 0.4,
+  "breaking_news_min_sources": 2,
+  "breaking_news_time_window_hours": 3,
+  "breaking_news_priority_boost": 2,
+  "story_similarity_threshold": 0.35,
+  "story_max_age_hours": 72,
+  "story_threading_enabled": true,
+  "story_retention_days": 3,
+  "untooted_story_retention_days": 1,
+  "ai_usage_retention_days": 14,
+  "tooted_hash_retention_days": 7,
+  "qa_enabled": true,
+  "qa_max_results": 5,
+  "qa_min_text_length": 10,
+  "qa_no_results_text": "Sorry, I couldn't find any matching news. Try different search terms!",
+  "qa_header_text": "Here are matching news articles:",
+  "poll_enabled": true,
+  "poll_chance": 0.15,
+  "regional_relevance": {
+    "enabled": true,
+    "always_local_feeds": ["local-newspaper", "police-reports"],
+    "multipliers": {
+      "local": 1.5,
+      "regional": 1.2,
+      "national": 1,
+      "international": 0.6
+    }
+  },
+  "semantic_similarity": {
+    "enabled": true,
+    "jaccard_definite_match": 0.4,
+    "jaccard_uncertain_low": 0.12,
+    "match_threshold": 0.7,
+    "max_pairs_per_batch": 20
+  },
+  "cw_mapping": [
+    {
+      "label": "Violence",
+      "id": "violence",
+      "words": ["violence", "attack", "assault"]
+    },
+    {
+      "label": "Accident",
+      "id": "accident",
+      "words": ["accident", "crash", "injured"]
+    }
+  ]
+}
