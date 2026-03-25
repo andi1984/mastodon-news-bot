@@ -1,5 +1,52 @@
 import { tokenize, jaccardSimilarity } from "./similarity.js";
 
+// Simulate batch story cache matching (mirrors processNewArticles logic)
+function simulateBatchMatching(
+  articles: Array<{ title: string; feedKey: string; contentSnippet?: string }>
+): Map<number, number> {
+  const STORY_SIMILARITY_THRESHOLD = 0.35;
+
+  // Maps article index -> story representative index
+  const storyAssignments = new Map<number, number>();
+  // Maps story representative index -> token set
+  const storyCache = new Map<number, Set<string>>();
+
+  for (let i = 0; i < articles.length; i++) {
+    const article = articles[i];
+    const articleText = article.contentSnippet
+      ? `${article.title} ${article.contentSnippet.slice(0, 500)}`
+      : article.title;
+    const articleTokens = tokenize(articleText);
+
+    let matchedStory: number | null = null;
+    let bestScore = 0;
+
+    // Check against existing stories in cache
+    for (const [storyIdx, storyTokens] of storyCache) {
+      const similarity = jaccardSimilarity(articleTokens, storyTokens);
+      if (similarity >= STORY_SIMILARITY_THRESHOLD && similarity > bestScore) {
+        bestScore = similarity;
+        matchedStory = storyIdx;
+      }
+    }
+
+    if (matchedStory !== null) {
+      storyAssignments.set(i, matchedStory);
+      // Merge tokens
+      const existingTokens = storyCache.get(matchedStory)!;
+      for (const token of articleTokens) {
+        existingTokens.add(token);
+      }
+    } else {
+      // Create new story with this article as representative
+      storyAssignments.set(i, i);
+      storyCache.set(i, articleTokens);
+    }
+  }
+
+  return storyAssignments;
+}
+
 // Test the core matching logic without DB dependencies
 describe("storyMatcher core logic", () => {
   const STORY_SIMILARITY_THRESHOLD = 0.35;
@@ -151,5 +198,80 @@ describe("storyMatcher core logic", () => {
       expect(result.matches).toBe(false); // Token-only fails
       // When semantic matching is enabled, this WILL be caught
     });
+  });
+});
+
+describe("cross-feed batch matching", () => {
+  it("groups articles from different feeds about same topic", () => {
+    const articles = [
+      { title: "Brand in Saarbrücken: Feuerwehr im Einsatz", feedKey: "feed-a" },
+      { title: "Neues Restaurant eröffnet in Homburg", feedKey: "feed-b" },
+      { title: "Saarbrücken: Brand in der Innenstadt - Feuerwehr vor Ort", feedKey: "feed-c" },
+    ];
+
+    const assignments = simulateBatchMatching(articles);
+
+    // Article 0 and 2 should be in the same story (both about fire in Saarbrücken)
+    expect(assignments.get(0)).toBe(0); // First article creates story
+    expect(assignments.get(2)).toBe(0); // Third article matches first
+
+    // Article 1 should be in its own story (different topic)
+    expect(assignments.get(1)).toBe(1);
+  });
+
+  it("handles multiple simultaneous news events from many feeds", () => {
+    const articles = [
+      { title: "Schwerer Unfall auf A1 Saarbrücken - Verletzte gemeldet", feedKey: "polizei" },
+      { title: "Brand in Völklingen: Feuerwehr im Großeinsatz", feedKey: "breaking-news" },
+      { title: "A1 Saarbrücken: Schwerer Unfall mit Verletzte", feedKey: "radio-salue" },
+      { title: "Großeinsatz Feuerwehr: Brand in Völklingen", feedKey: "saarnews" },
+      { title: "SPD-Fraktion fordert neue Verkehrskonzepte", feedKey: "tagesschau" },
+    ];
+
+    const assignments = simulateBatchMatching(articles);
+
+    // Story 1: Articles 0, 2 about accident on A1
+    expect(assignments.get(0)).toBe(0);
+    expect(assignments.get(2)).toBe(0);
+
+    // Story 2: Articles 1, 3 about fire in Völklingen (same keywords: Brand, Völklingen, Feuerwehr, Großeinsatz)
+    expect(assignments.get(1)).toBe(1);
+    expect(assignments.get(3)).toBe(1);
+
+    // Story 3: Article 4 is unrelated
+    expect(assignments.get(4)).toBe(4);
+  });
+
+  it("accumulates tokens for better subsequent matching", () => {
+    const articles = [
+      { title: "Polizei Saarbrücken: Einbruch in Geschäft - Zeugen gesucht", feedKey: "polizei" },
+      { title: "Einbruch in Saarbrücken - Polizei sucht Zeugen nach Tat", feedKey: "radio-salue" },
+      { title: "Saarbrücken: Polizei Zeugenaufruf nach Einbruch in Geschäft", feedKey: "breaking-news" },
+    ];
+
+    const assignments = simulateBatchMatching(articles);
+
+    // All three should be in the same story
+    // The token merging ensures later articles can still match
+    const storyRep = assignments.get(0)!;
+    expect(assignments.get(1)).toBe(storyRep);
+    expect(assignments.get(2)).toBe(storyRep);
+  });
+
+  it("does not falsely group unrelated articles", () => {
+    const articles = [
+      { title: "Konzert in der Saarlandhalle am Samstag", feedKey: "events" },
+      { title: "Polizeikontrolle auf der A8", feedKey: "polizei" },
+      { title: "Neuer Bürgermeister in St. Wendel gewählt", feedKey: "tagesschau" },
+      { title: "Restaurant Tipps für Saarbrücken", feedKey: "local" },
+    ];
+
+    const assignments = simulateBatchMatching(articles);
+
+    // Each article should create its own story (all unrelated)
+    expect(assignments.get(0)).toBe(0);
+    expect(assignments.get(1)).toBe(1);
+    expect(assignments.get(2)).toBe(2);
+    expect(assignments.get(3)).toBe(3);
   });
 });

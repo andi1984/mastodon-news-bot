@@ -158,6 +158,8 @@ export async function createStory(
     tokens = tokens.slice(0, MAX_STORY_TOKENS);
   }
 
+  const now = new Date().toISOString();
+
   const { data, error } = await db
     .from("stories")
     .insert({
@@ -165,6 +167,8 @@ export async function createStory(
       tokens,
       article_count: 1,
       tooted: false,
+      created_at: now,
+      updated_at: now,
     })
     .select("id")
     .single();
@@ -263,8 +267,10 @@ export async function processNewArticles(
 
   console.log(`Processing ${articles.length} articles for story assignment...`);
 
-  // Track stories we've already matched in this batch to avoid duplicate matching
-  const batchStoryMap = new Map<string, string>(); // article id -> story_id
+  // Cache of batch-created stories to avoid repeated DB queries
+  // Maps story_id -> tokens (as Set)
+  const batchStoryCache = new Map<string, Set<string>>();
+  let newStoriesCreated = 0;
 
   for (const article of articles) {
     const existingStory = await findMatchingStory(article, dbTable);
@@ -273,49 +279,60 @@ export async function processNewArticles(
       // Add to existing story
       await addArticleToStory(existingStory.id, article);
       await assignStoryToArticle(article.id, existingStory.id, dbTable);
+      console.log(
+        `  → Added to existing story: "${article.title.slice(0, 50)}..."`
+      );
     } else {
       // Check if we already created a story for a similar article in this batch
+      const articleText = article.contentSnippet
+        ? `${article.title} ${article.contentSnippet.slice(0, 500)}`
+        : article.title;
+      const articleTokens = tokenize(articleText);
+
       let matchedBatchStory: string | null = null;
+      let bestBatchScore = 0;
 
-      for (const [, storyId] of batchStoryMap) {
-        const db = createClient();
-        const { data } = await db
-          .from("stories")
-          .select("*")
-          .eq("id", storyId)
-          .single();
+      // Check against cached batch stories (no DB queries needed)
+      for (const [storyId, storyTokens] of batchStoryCache) {
+        const similarity = jaccardSimilarity(articleTokens, storyTokens);
 
-        if (data) {
-          const storyTokens = new Set((data as StoryRecord).tokens || []);
-          const articleText = article.contentSnippet
-            ? `${article.title} ${article.contentSnippet.slice(0, 500)}`
-            : article.title;
-          const articleTokens = tokenize(articleText);
-          const similarity = jaccardSimilarity(articleTokens, storyTokens);
-
-          if (similarity >= STORY_SIMILARITY_THRESHOLD) {
-            matchedBatchStory = storyId;
-            break;
-          }
+        if (similarity >= STORY_SIMILARITY_THRESHOLD && similarity > bestBatchScore) {
+          bestBatchScore = similarity;
+          matchedBatchStory = storyId;
         }
       }
 
       if (matchedBatchStory) {
         await addArticleToStory(matchedBatchStory, article);
         await assignStoryToArticle(article.id, matchedBatchStory, dbTable);
+
+        // Update the cached tokens for this story (merge new article's tokens)
+        const existingTokens = batchStoryCache.get(matchedBatchStory)!;
+        for (const token of articleTokens) {
+          existingTokens.add(token);
+        }
+
+        console.log(
+          `  → Added to batch story (score=${bestBatchScore.toFixed(3)}): "${article.title.slice(0, 50)}..."`
+        );
       } else {
         // Create new story
         const newStoryId = await createStory(article);
         if (newStoryId) {
           await assignStoryToArticle(article.id, newStoryId, dbTable);
-          batchStoryMap.set(article.id, newStoryId);
+          // Cache the new story's tokens for future batch matching
+          batchStoryCache.set(newStoryId, articleTokens);
+          newStoriesCreated++;
+          console.log(
+            `  → Created new story: "${article.title.slice(0, 50)}..."`
+          );
         }
       }
     }
   }
 
   console.log(
-    `Story assignment complete: ${batchStoryMap.size} new stories created`
+    `Story assignment complete: ${newStoriesCreated} new stories created, ${articles.length - newStoriesCreated} matched to existing`
   );
 }
 
