@@ -21,8 +21,7 @@ function toCamelCaseHashtag(tag: string): string {
 
 export type ClusterFormatOptions = {
   feedPriorities: Record<string, number>;
-  feedHashtags: string[];
-  feedSpecificHashtags?: Record<string, string[]>;
+  hashtags: string[]; // Pre-generated hashtags from hashtagGenerator
   breakingNewsMinSources?: number;
   breakingNewsTimeWindowHours?: number;
 };
@@ -33,8 +32,7 @@ export function formatClusterToot(
 ): string {
   const {
     feedPriorities,
-    feedHashtags,
-    feedSpecificHashtags,
+    hashtags: preGeneratedHashtags,
     breakingNewsMinSources = 3,
     breakingNewsTimeWindowHours = 2,
   } = options;
@@ -42,10 +40,7 @@ export function formatClusterToot(
   // Single-source cluster: delegate to existing formatter
   if (cluster.length === 1) {
     const item = cluster[0];
-    const specificHashtags =
-      item.feedKey && feedSpecificHashtags?.[item.feedKey];
-    const hashtags = [...feedHashtags, ...(specificHashtags || [])];
-    return rssFeedItem2Toot(item.article, hashtags);
+    return rssFeedItem2Toot(item.article, preGeneratedHashtags);
   }
 
   const primary = pickPrimaryArticle(cluster, feedPriorities);
@@ -58,11 +53,11 @@ export function formatClusterToot(
   const creator = primary.article.creator || primary.article["dc:creator"];
   const title = primary.article.title || "";
 
-  // Build hashtags from the primary article's feed (CamelCase for accessibility)
-  const specificHashtags =
-    primary.feedKey && feedSpecificHashtags?.[primary.feedKey];
-  const hashtags = [...feedHashtags, ...(specificHashtags || [])];
-  if (breaking) hashtags.push("Eilmeldung");
+  // Use pre-generated hashtags, add Eilmeldung if breaking
+  const hashtags = [...preGeneratedHashtags];
+  if (breaking && !hashtags.includes("Eilmeldung")) {
+    hashtags.push("Eilmeldung");
+  }
   const hashtagStr = hashtags
     .map((tag) => `#${toCamelCaseHashtag(tag)}`)
     .join(" ");

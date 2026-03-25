@@ -14,6 +14,7 @@ import { formatClusterToot, formatThreadReply } from "../helper/clusterFormatter
 import { scoreRegionalRelevance } from "../helper/regionalRelevance.js";
 import { markStoryTooted, getStoryTootId } from "../helper/storyMatcher.js";
 import { analyzeForPoll, PollSuggestion } from "../helper/engagementEnhancer.js";
+import { generateHashtags } from "../helper/hashtagGenerator.js";
 import {
   isInCooldown,
   setCooldown,
@@ -346,10 +347,15 @@ type StoryInfo = {
     try {
       const primary = pickPrimaryArticle(story.articles, FEED_PRIORITIES);
 
+      // Generate content-derived hashtags from primary article
+      const hashtags = await generateHashtags(
+        primary.article.title || "",
+        settings.feed_hashtags
+      );
+
       const tootText = formatClusterToot(story.articles, {
         feedPriorities: FEED_PRIORITIES,
-        feedHashtags: settings.feed_hashtags,
-        feedSpecificHashtags: (settings as any).feed_specific_hashtags,
+        hashtags,
         breakingNewsMinSources: BREAKING_NEWS_MIN_SOURCES,
         breakingNewsTimeWindowHours: BREAKING_NEWS_TIME_WINDOW,
       });

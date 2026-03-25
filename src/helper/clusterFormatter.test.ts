@@ -26,8 +26,7 @@ function makeArticle(overrides: {
 
 const defaultOptions: ClusterFormatOptions = {
   feedPriorities: { "feed-a": 0.9, "feed-b": 0.5, "feed-c": 0.3 },
-  feedHashtags: ["news", "saarlandnews"],
-  feedSpecificHashtags: { "feed-a": ["extra"] },
+  hashtags: ["News", "Saarlandnews", "Extra"],
   breakingNewsMinSources: 3,
   breakingNewsTimeWindowHours: 2,
 };
@@ -150,9 +149,9 @@ describe("formatClusterToot", () => {
     ];
     const clusterResult = formatClusterToot(cluster, defaultOptions);
     const directResult = rssFeedItem2Toot(cluster[0].article, [
-      "news",
-      "saarlandnews",
-      "extra",
+      "News",
+      "Saarlandnews",
+      "Extra",
     ]);
     expect(clusterResult).toBe(directResult);
   });
