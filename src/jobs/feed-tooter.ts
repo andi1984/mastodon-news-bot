@@ -359,14 +359,14 @@ type StoryInfo = {
       if (
         POLL_ENABLED &&
         !pollPostedThisRun &&
-        !story.isBreaking && // Don't poll on breaking news
-        Math.random() < POLL_CHANCE
+        !story.isBreaking // Don't poll on breaking news
       ) {
         const analysis = await analyzeForPoll(
           primary.article.title || "",
           primary.feedKey
         );
-        if (analysis.isDebatable && analysis.poll) {
+        // Apply random chance AFTER confirming topic is debatable
+        if (analysis.isDebatable && analysis.poll && Math.random() < POLL_CHANCE) {
           pollConfig = analysis.poll;
           console.log(`Poll suggested: "${analysis.poll.question}"`);
         }
