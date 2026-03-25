@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { parentPort } from "node:worker_threads";
 import createClient from "../helper/db.js";
 import getInstance from "../helper/login.js";
@@ -13,19 +14,31 @@ import { formatClusterToot, formatThreadReply } from "../helper/clusterFormatter
 import { scoreRegionalRelevance } from "../helper/regionalRelevance.js";
 import { markStoryTooted, getStoryTootId } from "../helper/storyMatcher.js";
 import { analyzeForPoll, PollSuggestion } from "../helper/engagementEnhancer.js";
+import {
+  isInCooldown,
+  setCooldown,
+  getMinutesSinceLastToot,
+  recordLastToot,
+  recordPinnedToot,
+} from "../helper/botState.js";
 
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const settings = require("../data/settings.json");
 
-const BATCH_SIZE = (settings as any).toot_batch_size ?? 3;
+// Adaptive tooting settings (from settings.json)
+const adaptiveSettings = (settings as any).adaptive_tooting ?? {};
+const NORMAL_BATCH_SIZE = adaptiveSettings.normal_batch_size ?? 2;
+const BREAKING_BATCH_SIZE = adaptiveSettings.breaking_batch_size ?? 3;
+const MIN_MINUTES_BETWEEN_TOOTS = adaptiveSettings.min_minutes_between_toots ?? 30;
+
 const FEED_PRIORITIES: Record<string, number> =
   (settings as any).feed_priorities ?? {};
 const MIN_FRESHNESS_HOURS = settings.min_freshness_hours || 24;
 const BREAKING_NEWS_MIN_SOURCES =
-  (settings as any).breaking_news_min_sources ?? 3;
+  (settings as any).breaking_news_min_sources ?? 2;
 const BREAKING_NEWS_TIME_WINDOW =
-  (settings as any).breaking_news_time_window_hours ?? 2;
+  (settings as any).breaking_news_time_window_hours ?? 3;
 const BREAKING_NEWS_BOOST =
   (settings as any).breaking_news_priority_boost ?? 2.0;
 const STORY_THREADING_ENABLED =
@@ -68,6 +81,15 @@ type StoryInfo = {
 
 (async () => {
   const db = createClient();
+
+  // 0. Check if we're in cooldown (after breaking news)
+  const cooldownStatus = await isInCooldown();
+  if (cooldownStatus.inCooldown) {
+    console.log(`Skipping: in cooldown (reason: ${cooldownStatus.reason})`);
+    if (parentPort) parentPort.postMessage("done");
+    else process.exit(0);
+    return;
+  }
 
   // 1. Fetch untooted articles with story_id
   let untootedQuery = db
@@ -274,12 +296,38 @@ type StoryInfo = {
     });
   }
 
-  // 7. Sort by score, pick top BATCH_SIZE
+  // 7. Sort by score and apply adaptive batch selection
   postableStories.sort((a, b) => b.storyScore - a.storyScore);
-  const batch = postableStories.slice(0, BATCH_SIZE);
+
+  // Separate breaking news from regular news
+  const breakingStories = postableStories.filter((s) => s.isBreaking);
+  const normalStories = postableStories.filter((s) => !s.isBreaking);
+
+  let batch: typeof postableStories = [];
+  let isBreakingRun = false;
+
+  if (breakingStories.length > 0) {
+    // Breaking news detected - toot immediately with larger batch
+    batch = breakingStories.slice(0, BREAKING_BATCH_SIZE);
+    isBreakingRun = true;
+    console.log(`BREAKING NEWS detected: ${breakingStories.length} stories, posting ${batch.length}`);
+  } else {
+    // Normal news - check if enough time has passed
+    const minutesSinceLast = await getMinutesSinceLastToot();
+    console.log(`Minutes since last toot: ${minutesSinceLast.toFixed(1)}`);
+
+    if (minutesSinceLast < MIN_MINUTES_BETWEEN_TOOTS) {
+      console.log(`Skipping: only ${minutesSinceLast.toFixed(0)}min since last toot (min: ${MIN_MINUTES_BETWEEN_TOOTS})`);
+      // Still process follow-up threads, but skip new stories
+      batch = [];
+    } else {
+      // Enough time passed - post 1-2 normal stories
+      batch = normalStories.slice(0, NORMAL_BATCH_SIZE);
+    }
+  }
 
   console.log(
-    `Stories: ${storyGroups.size} grouped + ${orphanClusters.length} orphans → posting top ${batch.length}`
+    `Stories: ${storyGroups.size} grouped + ${orphanClusters.length} orphans → posting ${batch.length}${isBreakingRun ? " (BREAKING)" : ""}`
   );
   for (const story of batch) {
     const primary = pickPrimaryArticle(story.articles, FEED_PRIORITIES);
@@ -378,6 +426,20 @@ type StoryInfo = {
         console.log(`Poll posted with ${pollConfig.options.length} options`);
       }
 
+      // For breaking news: pin the toot and set cooldown
+      if (story.isBreaking) {
+        try {
+          await mastoClient.v1.statuses.$select(tootResult.id).pin();
+          await recordPinnedToot(tootResult.id);
+          console.log(`Pinned breaking news toot ${tootResult.id}`);
+        } catch (pinErr) {
+          console.error(`Failed to pin breaking news: ${pinErr}`);
+        }
+      }
+
+      // Record last toot time for rate limiting
+      await recordLastToot();
+
       // Mark story as tooted, storing original links for deduplication in quote replies
       if (story.storyId) {
         const originalLinks = story.articles
@@ -424,6 +486,12 @@ type StoryInfo = {
     } catch (e) {
       console.error(`Failed to toot story: ${e}`);
     }
+  }
+
+  // Set cooldown after posting breaking news
+  if (isBreakingRun && batch.length > 0) {
+    await setCooldown("breaking_news");
+    console.log("Cooldown activated: 1 hour pause for regular news");
   }
 
   // 9. Post follow-up threads (limited to 2 per run to avoid spam)

@@ -70,7 +70,13 @@
       "blaulicht"
     ]
   },
-  "toot_batch_size": 3,
+  "adaptive_tooting": {
+    "normal_batch_size": 2,
+    "breaking_batch_size": 3,
+    "min_minutes_between_toots": 30,
+    "cooldown_hours": 1,
+    "pin_duration_hours": 48
+  },
   "feed_priorities": {
     "saarbruecker-zeitung": 0.1,
     "tagesschau": 0.3,

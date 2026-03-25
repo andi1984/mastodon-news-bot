@@ -1,8 +1,15 @@
+import "dotenv/config";
 import { parentPort } from "node:worker_threads";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const settings = require("../data/settings.json");
 import createClient from "../helper/db.js";
+import getInstance from "../helper/login.js";
+import {
+  getExpiredPins,
+  removePinRecord,
+  cleanupExpiredState,
+} from "../helper/botState.js";
 
 const supabase = createClient();
 
@@ -24,6 +31,8 @@ interface CleanupStats {
   aiUsageRows: number;
   tootedHashes: number;
   prunedStoryTokens: number;
+  unpinnedToots: number;
+  expiredBotState: number;
 }
 
 async function cleanupTootedArticles(): Promise<number> {
@@ -180,6 +189,38 @@ async function cleanupTootedHashes(): Promise<number> {
   return data?.length ?? 0;
 }
 
+async function unpinExpiredToots(): Promise<number> {
+  const expiredTootIds = await getExpiredPins();
+
+  if (expiredTootIds.length === 0) {
+    return 0;
+  }
+
+  let unpinned = 0;
+
+  try {
+    const mastoClient = await getInstance();
+
+    for (const tootId of expiredTootIds) {
+      try {
+        await mastoClient.v1.statuses.$select(tootId).unpin();
+        await removePinRecord(tootId);
+        unpinned++;
+        console.log(`Unpinned expired toot ${tootId}`);
+      } catch (err) {
+        // Toot might have been deleted or already unpinned
+        console.error(`Failed to unpin ${tootId}: ${err}`);
+        // Still remove the record to avoid retrying
+        await removePinRecord(tootId);
+      }
+    }
+  } catch (err) {
+    console.error(`Unpin cleanup failed: ${err}`);
+  }
+
+  return unpinned;
+}
+
 async function pruneStoryTokens(): Promise<number> {
   // Find stories with oversized token arrays
   const { data: largeStories, error: fetchError } = await supabase
@@ -228,11 +269,13 @@ async function runFullCleanup(): Promise<CleanupStats> {
   ]);
 
   // These depend on stories being cleaned first
-  const [orphanedStoryRefs, aiUsageRows, tootedHashes, prunedStoryTokens] = await Promise.all([
+  const [orphanedStoryRefs, aiUsageRows, tootedHashes, prunedStoryTokens, unpinnedToots, expiredBotState] = await Promise.all([
     cleanupOrphanedStoryRefs(),
     cleanupAiUsage(),
     cleanupTootedHashes(),
     pruneStoryTokens(),
+    unpinExpiredToots(),
+    cleanupExpiredState(),
   ]);
 
   return {
@@ -244,6 +287,8 @@ async function runFullCleanup(): Promise<CleanupStats> {
     aiUsageRows,
     tootedHashes,
     prunedStoryTokens,
+    unpinnedToots,
+    expiredBotState,
   };
 }
 
@@ -256,6 +301,7 @@ async function runFullCleanup(): Promise<CleanupStats> {
   console.log(`  Articles: ${stats.tootedArticles} tooted, ${stats.staleArticles} stale`);
   console.log(`  Stories: ${stats.tootedStories} tooted, ${stats.untootedStories} untooted`);
   console.log(`  Maintenance: ${stats.orphanedStoryRefs} orphan refs, ${stats.aiUsageRows} AI logs, ${stats.tootedHashes} old hashes, ${stats.prunedStoryTokens} token arrays pruned`);
+  console.log(`  Bot state: ${stats.unpinnedToots} unpinned, ${stats.expiredBotState} expired state`);
 
   if (parentPort) parentPort.postMessage("done");
   else process.exit(0);
