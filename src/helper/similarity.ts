@@ -12,10 +12,10 @@ export type ClusterArticle = {
   score: number;
 };
 
-// Thresholds for hybrid matching
-const JACCARD_DEFINITE_MATCH = 0.4; // Above this: definitely same story (no AI needed)
-const JACCARD_UNCERTAIN_LOW = 0.12; // Below this: definitely different (no AI needed)
-const SEMANTIC_MATCH_THRESHOLD = 0.7; // Semantic score needed to cluster
+// Thresholds for hybrid matching - raised to prevent false positives
+const JACCARD_DEFINITE_MATCH = 0.45; // Above this: definitely same story (no AI needed)
+const JACCARD_UNCERTAIN_LOW = 0.18; // Below this: definitely different (no AI needed)
+const SEMANTIC_MATCH_THRESHOLD = 0.8; // Semantic score needed to cluster (stricter)
 
 // Common German stopwords
 const STOPWORDS = new Set([

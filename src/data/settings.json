@@ -101,7 +101,7 @@
   "breaking_news_min_sources": 2,
   "breaking_news_time_window_hours": 3,
   "breaking_news_priority_boost": 2,
-  "story_similarity_threshold": 0.35,
+  "story_similarity_threshold": 0.40,
   "story_max_age_hours": 72,
   "story_threading_enabled": true,
   "story_retention_days": 3,
@@ -135,9 +135,9 @@
   },
   "semantic_similarity": {
     "enabled": true,
-    "jaccard_definite_match": 0.4,
-    "jaccard_uncertain_low": 0.12,
-    "match_threshold": 0.7,
+    "jaccard_definite_match": 0.45,
+    "jaccard_uncertain_low": 0.18,
+    "match_threshold": 0.8,
     "max_pairs_per_batch": 20
   },
   "cw_mapping": [

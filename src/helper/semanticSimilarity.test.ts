@@ -34,54 +34,76 @@ describe("semanticSimilarity types", () => {
 describe("semantic similarity expected behavior", () => {
   // These document what the semantic matcher SHOULD return
   // when called with real API access
+  // NOTE: With stricter prompt (2024-03), we require score >= 0.8 to match
 
   const expectedMatches: Array<{
     titleA: string;
     titleB: string;
-    expectedScore: string; // "high" (0.7+), "medium" (0.4-0.7), "low" (<0.4)
+    expectedScore: string; // "high" (0.8+), "medium" (0.4-0.8), "low" (<0.4)
+    shouldMatch: boolean; // Whether this should cluster (score >= 0.8)
     reason: string;
   }> = [
     {
       titleA: "Feuer zerstört Lagerhalle in Homburg",
       titleB: "Brand in Homburger Lagerhalle",
       expectedScore: "high",
-      reason: "Feuer and Brand are synonyms (both mean fire)",
+      shouldMatch: true,
+      reason: "Same event: fire at same location (Homburg warehouse)",
     },
     {
       titleA: "Ministerpräsidentin kündigt Maßnahmen an",
       titleB: "Anke Rehlinger stellt Plan vor",
       expectedScore: "high",
-      reason: "Anke Rehlinger is the Ministerpräsidentin of Saarland",
+      shouldMatch: true,
+      reason: "Same event: Anke Rehlinger is the Ministerpräsidentin of Saarland",
     },
     {
       titleA: "Unfall auf A1 bei Saarbrücken",
       titleB: "A1 Saarbrücken: Verkehrsunfall",
       expectedScore: "high",
-      reason: "Same event, same location, Unfall = Verkehrsunfall",
+      shouldMatch: true,
+      reason: "Same event: accident at same location (A1 Saarbrücken)",
     },
     {
       titleA: "Neues Restaurant in Saarbrücken",
       titleB: "Polizeieinsatz in Saarbrücken",
       expectedScore: "low",
-      reason: "Completely different topics at same location",
+      shouldMatch: false,
+      reason: "Different topics - only location in common",
     },
     {
       titleA: "Feuerwehr löscht Brand in Neunkirchen",
       titleB: "Brand in Homburg: Feuerwehr im Einsatz",
-      expectedScore: "medium",
-      reason: "Similar event type but different locations",
+      expectedScore: "low",
+      shouldMatch: false,
+      reason: "DIFFERENT events - fires at different locations should NOT match",
+    },
+    {
+      titleA: "Zugverkehr: Verspätungen im Saarland",
+      titleB: "Hausbrand in Saarbrücken",
+      expectedScore: "low",
+      shouldMatch: false,
+      reason: "Completely different topics (trains vs fire)",
+    },
+    {
+      titleA: "Wirtschaftsminister trifft Unternehmer",
+      titleB: "Brand in Lagerhalle fordert Feuerwehreinsatz",
+      expectedScore: "low",
+      shouldMatch: false,
+      reason: "Completely different topics (economy vs fire)",
     },
   ];
 
   it.each(expectedMatches)(
-    "should score $expectedScore: $titleA vs $titleB ($reason)",
-    ({ titleA, titleB, expectedScore }) => {
+    "should score $expectedScore (match=$shouldMatch): $titleA vs $titleB",
+    ({ titleA, titleB, expectedScore, shouldMatch }) => {
       // This test documents expected behavior without calling the API
       // When the API is called, we expect these scores:
-      // - high: 0.7+ (should cluster)
-      // - medium: 0.4-0.7 (might cluster depending on threshold)
-      // - low: <0.4 (should not cluster)
+      // - high: 0.85+ (should cluster, same specific event)
+      // - medium: 0.4-0.85 (should NOT cluster - threshold is 0.8)
+      // - low: <0.4 (definitely should not cluster)
       expect(["high", "medium", "low"]).toContain(expectedScore);
+      expect(typeof shouldMatch).toBe("boolean");
     }
   );
 });

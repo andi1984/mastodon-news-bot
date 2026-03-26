@@ -4,7 +4,7 @@ import { tokenize, jaccardSimilarity } from "./similarity.js";
 function simulateBatchMatching(
   articles: Array<{ title: string; feedKey: string; contentSnippet?: string }>
 ): Map<number, number> {
-  const STORY_SIMILARITY_THRESHOLD = 0.35;
+  const STORY_SIMILARITY_THRESHOLD = 0.40;
 
   // Maps article index -> story representative index
   const storyAssignments = new Map<number, number>();
@@ -49,7 +49,7 @@ function simulateBatchMatching(
 
 // Test the core matching logic without DB dependencies
 describe("storyMatcher core logic", () => {
-  const STORY_SIMILARITY_THRESHOLD = 0.35;
+  const STORY_SIMILARITY_THRESHOLD = 0.40;
 
   function wouldMatch(
     storyTitle: string,

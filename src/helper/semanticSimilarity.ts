@@ -15,19 +15,34 @@ export interface SemanticResult {
   score: number;
 }
 
-const BATCH_SYSTEM_PROMPT = `Du vergleichst Nachrichtenartikel-Paare und bewertest, wie ähnlich sie thematisch sind.
+const BATCH_SYSTEM_PROMPT = `Du entscheidest ob zwei Nachrichtenartikel über DASSELBE SPEZIFISCHE EREIGNIS berichten.
 
-Gleiche Geschichte (score 0.8-1.0): Selbes Ereignis, selber Ort, selbe Personen
-- "Feuer zerstört Lagerhalle" und "Brand in Lagerhalle" = 0.9 (Synonyme)
-- "Ministerpräsidentin kündigt Plan an" und "Anke Rehlinger stellt Maßnahmen vor" = 0.85 (selbe Person)
+WICHTIG: Zwei Artikel gehören NUR zusammen wenn sie über EXAKT DASSELBE berichten:
+- Selber Vorfall (gleicher Brand, gleicher Unfall, gleiche Ankündigung)
+- Selber Ort UND selbes Thema
+- Gleiche handelnde Personen im gleichen Kontext
 
-Verwandte Geschichte (score 0.4-0.7): Ähnliches Thema aber anderes Ereignis
-- Zwei verschiedene Unfälle am selben Tag = 0.5
+GLEICHE GESCHICHTE (score 0.85-1.0):
+✓ "Feuer zerstört Lagerhalle Homburg" + "Brand in Homburger Lagerhalle" = 0.9
+✓ "Anke Rehlinger kündigt Wirtschaftsplan an" + "Ministerpräsidentin stellt Maßnahmen vor" = 0.85
+✓ "Unfall A1 Saarbrücken 3 Verletzte" + "A1: Schwerer Unfall bei Saarbrücken" = 0.9
 
-Verschiedene Geschichte (score 0.0-0.3): Komplett andere Themen oder Orte
+VERSCHIEDENE GESCHICHTEN (score 0.0-0.3):
+✗ Zwei verschiedene Brände (anderer Ort) = 0.2
+✗ Zwei verschiedene Unfälle (anderer Ort/Tag) = 0.2
+✗ Wirtschaftsnachrichten + Feuerwehreinsatz = 0.0
+✗ Zugverkehr + Hausbrand = 0.0
+✗ Politik + Kriminalität = 0.1
+✗ Gleicher Ort aber anderes Thema = 0.1
 
-Antworte NUR mit JSON-Array: [{"a":0,"b":1,"s":0.85},...]
-Keine Erklärung, nur JSON.`;
+NIEMALS zusammenführen:
+- Artikel über komplett unterschiedliche Themen
+- Artikel die nur den Ort gemeinsam haben
+- Artikel über ähnliche aber SEPARATE Ereignisse
+
+Im Zweifel: Score unter 0.3 vergeben!
+
+Antworte NUR mit JSON-Array: [{"a":0,"b":1,"s":0.85},...]`;
 
 /**
  * Batch semantic similarity comparison using Claude.

@@ -36,9 +36,10 @@ const STORY_MAX_AGE_HOURS = (settings as any).story_max_age_hours ?? 72;
 const MAX_STORY_TOKENS = 150; // Prevent unbounded token array growth
 
 // AI matching thresholds - only use AI when token score is uncertain
-const AI_UNCERTAIN_LOW = 0.15; // Below this: definitely different stories
+// Raised thresholds to prevent false positives from regional token overlap
+const AI_UNCERTAIN_LOW = 0.20; // Below this: definitely different stories
 const AI_UNCERTAIN_HIGH = STORY_SIMILARITY_THRESHOLD; // Above this: definitely same story
-const SEMANTIC_MATCH_THRESHOLD = 0.7; // Semantic score needed to consider a match
+const SEMANTIC_MATCH_THRESHOLD = 0.8; // Semantic score needed to consider a match (stricter)
 
 /**
  * Find an existing story that matches the given article, or return null.
@@ -182,7 +183,10 @@ export async function createStory(
 }
 
 /**
- * Add an article to an existing story - updates token set and metadata.
+ * Add an article to an existing story - updates metadata only.
+ * NOTE: We intentionally do NOT merge tokens to prevent "topic drift" where
+ * a story accumulates tokens from multiple articles and starts matching
+ * unrelated content. The story keeps only its original (primary) tokens.
  */
 export async function addArticleToStory(
   storyId: string,
@@ -193,7 +197,7 @@ export async function addArticleToStory(
   // First get current story data
   const { data: story, error: fetchError } = await db
     .from("stories")
-    .select("tokens, article_count")
+    .select("article_count")
     .eq("id", storyId)
     .single();
 
@@ -202,28 +206,10 @@ export async function addArticleToStory(
     return;
   }
 
-  // Merge tokens (capped to prevent unbounded growth)
-  const articleText = article.contentSnippet
-    ? `${article.title} ${article.contentSnippet.slice(0, 500)}`
-    : article.title;
-  const newTokens = tokenize(articleText);
-  const existingTokens = new Set(story.tokens || []);
-
-  for (const token of newTokens) {
-    existingTokens.add(token);
-  }
-
-  // Cap token array size to prevent DB bloat
-  let finalTokens = Array.from(existingTokens);
-  if (finalTokens.length > MAX_STORY_TOKENS) {
-    finalTokens = finalTokens.slice(0, MAX_STORY_TOKENS);
-  }
-
-  // Update story
+  // Update story - only increment count and timestamp, DO NOT merge tokens
   const { error: updateError } = await db
     .from("stories")
     .update({
-      tokens: finalTokens,
       article_count: story.article_count + 1,
       updated_at: new Date().toISOString(),
     })
@@ -306,11 +292,8 @@ export async function processNewArticles(
         await addArticleToStory(matchedBatchStory, article);
         await assignStoryToArticle(article.id, matchedBatchStory, dbTable);
 
-        // Update the cached tokens for this story (merge new article's tokens)
-        const existingTokens = batchStoryCache.get(matchedBatchStory)!;
-        for (const token of articleTokens) {
-          existingTokens.add(token);
-        }
+        // NOTE: Do NOT merge tokens - this prevents "topic drift" where
+        // stories accumulate tokens and match unrelated articles
 
         console.log(
           `  → Added to batch story (score=${bestBatchScore.toFixed(3)}): "${article.title.slice(0, 50)}..."`
