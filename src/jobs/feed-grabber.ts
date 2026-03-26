@@ -116,7 +116,15 @@ async function fetchFeedBatch(
     }
   }
 
-  const newCandidates = allCandidates.filter((c) => !existingHashes.has(c.hash));
+  const filteredCandidates = allCandidates.filter((c) => !existingHashes.has(c.hash));
+
+  // Dedupe within batch (same hash can appear if RSS feed has duplicates)
+  const seenHashes = new Set<string>();
+  const newCandidates = filteredCandidates.filter((c) => {
+    if (seenHashes.has(c.hash)) return false;
+    seenHashes.add(c.hash);
+    return true;
+  });
 
   if (newCandidates.length === 0) {
     console.log("No new items to insert");
@@ -136,9 +144,10 @@ async function fetchFeedBatch(
   }
 
   // Phase 3: Insert all new candidates in a single batch
+  // Use upsert with ignoreDuplicates to handle race conditions gracefully
   const { data: inserted, error: insertError } = await supabase
     .from(settings.db_table)
-    .insert(newCandidates)
+    .upsert(newCandidates, { onConflict: "hash", ignoreDuplicates: true })
     .select("id, data, pub_date");
 
   if (insertError) {
