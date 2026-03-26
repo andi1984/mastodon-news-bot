@@ -35,3 +35,6 @@ coverage/
 
 # Local migrations (documented in README)
 migrations/
+
+# Local diagnostic scripts
+scripts/check-supabase.ts

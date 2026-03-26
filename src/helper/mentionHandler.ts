@@ -3,7 +3,7 @@ import { answerQuestion, QASettings } from "./questionAnswerer.js";
 export async function isNewsTootThread(
   mastoClient: any,
   inReplyToId: string,
-  botUsername: string
+  botUsername: string,
 ): Promise<boolean> {
   try {
     const context = await mastoClient.v1.statuses
@@ -12,9 +12,7 @@ export async function isNewsTootThread(
     const ancestors = context.ancestors ?? [];
 
     if (ancestors.length === 0) {
-      const parent = await mastoClient.v1.statuses
-        .$select(inReplyToId)
-        .fetch();
+      const parent = await mastoClient.v1.statuses.$select(inReplyToId).fetch();
       return parent.account.acct === botUsername;
     }
 
@@ -28,7 +26,7 @@ export async function isNewsTootThread(
 
 export async function handleMentions(
   mastoClient: any,
-  config: { username: string; qa_enabled?: boolean } & QASettings
+  config: { username: string; qa_enabled?: boolean } & QASettings,
 ): Promise<void> {
   const notifications = await mastoClient.v1.notifications.list({
     types: ["mention"],
@@ -56,7 +54,7 @@ export async function handleMentions(
       const isNews = await isNewsTootThread(
         mastoClient,
         status.inReplyToId,
-        config.username
+        config.username,
       );
       if (isNews) {
         await mastoClient.v1.notifications.$select(notification.id).dismiss();
@@ -67,7 +65,7 @@ export async function handleMentions(
     const replyText = await answerQuestion(
       status.account.acct,
       status.content,
-      config
+      config,
     );
 
     await mastoClient.v1.statuses.create({
