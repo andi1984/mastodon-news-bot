@@ -20,6 +20,7 @@
     "daily-digest": "tsx src/jobs/daily-digest.ts",
     "weekly-digest": "tsx src/jobs/weekly-digest.ts",
     "manage-feeds": "tsx scripts/manage-feeds.ts",
+    "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage",
     "typecheck": "tsc --noEmit",
     "prepare": "husky"
   },
@@ -40,6 +41,7 @@
     "@types/node": "^22.15.27",
     "husky": "^9.1.7",
     "jest": "^29.7.0",
+    "jest-junit": "^16.0.0",
     "nodemon": "^3.1.14",
     "prettier": "^3.8.1",
     "ts-jest": "^29.4.6",
@@ -79,6 +81,23 @@
     ],
     "resetMocks": false,
     "clearMocks": true,
-    "testEnvironment": "node"
+    "testEnvironment": "node",
+    "collectCoverageFrom": [
+      "src/**/*.ts",
+      "!src/**/*.test.ts",
+      "!src/index.ts",
+      "!src/types/**",
+      "!src/data/**",
+      "!src/jobs/**",
+      "!src/scripts/**"
+    ],
+    "coverageDirectory": "coverage",
+    "coverageReporters": [
+      "text",
+      "text-summary",
+      "lcov",
+      "json-summary",
+      "json"
+    ]
   }
 }

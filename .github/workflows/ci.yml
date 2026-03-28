@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [master]
 
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
 jobs:
   commitlint:
     runs-on: ubuntu-latest
@@ -50,8 +55,60 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
-      - name: Run tests
-        run: npm test
+      - name: Run tests with coverage
+        run: npm run test:coverage -- --ci --reporters=default --reporters=jest-junit
+        env:
+          JEST_JUNIT_OUTPUT_DIR: ./reports
+          JEST_JUNIT_OUTPUT_NAME: junit.xml
+
+      - name: Upload test results
+        if: always() && matrix.node-version == 20
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: reports/junit.xml
+          retention-days: 30
+
+      - name: Upload coverage report
+        if: always() && matrix.node-version == 20
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 30
+
+      - name: Test report
+        if: always() && matrix.node-version == 20
+        uses: dorny/test-reporter@v1
+        with:
+          name: Test Results
+          path: reports/junit.xml
+          reporter: jest-junit
+          fail-on-error: true
+
+      - name: Coverage report
+        if: always() && matrix.node-version == 20 && github.event_name == 'pull_request'
+        uses: davelosert/vitest-coverage-report-action@v2
+        with:
+          json-summary-path: coverage/coverage-summary.json
+          json-final-path: coverage/coverage-final.json
+          name: Coverage Report
+
+      - name: Coverage summary on push
+        if: always() && matrix.node-version == 20 && github.event_name == 'push'
+        run: |
+          echo "## Test Coverage" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          node -e "
+            const s = require('./coverage/coverage-summary.json').total;
+            const fmt = (m) => m.pct + '%';
+            console.log('Statements : ' + fmt(s.statements));
+            console.log('Branches   : ' + fmt(s.branches));
+            console.log('Functions  : ' + fmt(s.functions));
+            console.log('Lines      : ' + fmt(s.lines));
+          " >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
 
   build:
     runs-on: ubuntu-latest
