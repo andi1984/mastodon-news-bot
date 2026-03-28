@@ -6,6 +6,7 @@ import {
   formatDigestToot,
   DigestEntry,
 } from "../helper/digestFormatter.js";
+import { calculateEngagement } from "../helper/engagementCounter.js";
 import type { mastodon } from "masto";
 
 function getTodayBerlin(): string {
@@ -50,27 +51,37 @@ function getDateBerlin(date: string): string {
     return;
   }
 
-  // Score by engagement, only keep articles with at least 1 interaction
-  const scored = todayStatuses
-    .map((status) => ({
-      status,
-      activity:
-        (status.reblogsCount ?? 0) +
-        (status.favouritesCount ?? 0) +
-        (status.repliesCount ?? 0),
-    }))
-    .filter((s) => s.activity > 0)
-    .sort((a, b) => b.activity - a.activity)
-    .slice(0, 5);
+  // Score by engagement, excluding bot's own replies (Update toots)
+  const scored: { status: mastodon.v1.Status; activity: number }[] = [];
 
-  if (scored.length === 0) {
-    console.log("[daily-digest] No statuses with interactions, skipping digest.");
+  for (const status of todayStatuses) {
+    // Fetch context to get replies and filter out bot's own
+    const context = await mastoClient.v1.statuses.$select(status.id).context.fetch();
+    const engagement = calculateEngagement(status, context.descendants, me.id);
+
+    if (engagement.totalInteractions > 0) {
+      scored.push({ status, activity: engagement.totalInteractions });
+
+      if (engagement.ownReplies > 0) {
+        console.log(
+          `[daily-digest] Status ${status.id}: excluded ${engagement.ownReplies} own replies`
+        );
+      }
+    }
+  }
+
+  // Sort by activity and take top 5
+  scored.sort((a, b) => b.activity - a.activity);
+  const topScored = scored.slice(0, 5);
+
+  if (topScored.length === 0) {
+    console.log("[daily-digest] No statuses with external interactions, skipping digest.");
     if (parentPort) parentPort.postMessage("done");
     else process.exit(0);
     return;
   }
 
-  const entries: DigestEntry[] = scored.map((s) => ({
+  const entries: DigestEntry[] = topScored.map((s) => ({
     title: extractTitleFromStatus(s.status),
     link: s.status.url ?? null,
     score: s.activity,
