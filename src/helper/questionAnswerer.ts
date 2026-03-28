@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import createClient from "./db.js";
-import { hasAiBudget, logAiUsage } from "./costTracker.js";
+import { hasAiBudgetForSource, logAiUsage } from "./costTracker.js";
 
 export interface QASettings {
   db_table: string;
@@ -55,8 +55,8 @@ export async function extractKeywords(text: string): Promise<string[]> {
   }
 
   try {
-    if (!(await hasAiBudget())) {
-      console.warn("questionAnswerer: daily AI budget exceeded");
+    if (!(await hasAiBudgetForSource("question_answerer"))) {
+      console.warn("questionAnswerer: AI budget threshold reached");
       return [];
     }
 

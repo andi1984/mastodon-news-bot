@@ -10,7 +10,7 @@ const MockedAnthropic = jest.fn(() => ({
   messages: { create: mockMessagesCreate },
 }));
 
-const mockHasAiBudget = jest.fn();
+const mockHasAiBudgetForSource = jest.fn();
 const mockLogAiUsage = jest.fn();
 
 const mockDbFrom = jest.fn();
@@ -25,7 +25,7 @@ jest.unstable_mockModule("./db", () => ({
 }));
 
 jest.unstable_mockModule("./costTracker", () => ({
-  hasAiBudget: mockHasAiBudget,
+  hasAiBudgetForSource: mockHasAiBudgetForSource,
   logAiUsage: mockLogAiUsage,
 }));
 
@@ -94,7 +94,7 @@ describe("extractKeywords", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     process.env = { ...originalEnv, CLAUDE_API_KEY: "test-key" };
-    mockHasAiBudget.mockResolvedValue(true);
+    mockHasAiBudgetForSource.mockResolvedValue(true);
     mockLogAiUsage.mockResolvedValue(undefined);
   });
 
@@ -146,7 +146,7 @@ describe("extractKeywords", () => {
   });
 
   it("returns empty array when AI budget is exceeded", async () => {
-    mockHasAiBudget.mockResolvedValue(false);
+    mockHasAiBudgetForSource.mockResolvedValue(false);
     MockedAnthropic.mockClear();
 
     const result = await extractKeywords("Was gibt es Neues zum Radweg?");
@@ -238,7 +238,7 @@ describe("answerQuestion", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     process.env = { ...originalEnv, CLAUDE_API_KEY: "test-key" };
-    mockHasAiBudget.mockResolvedValue(true);
+    mockHasAiBudgetForSource.mockResolvedValue(true);
     mockLogAiUsage.mockResolvedValue(undefined);
   });
 

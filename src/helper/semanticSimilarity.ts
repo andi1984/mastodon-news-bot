@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { hasAiBudget, logAiUsage } from "./costTracker.js";
+import { hasAiBudgetForSource, logAiUsage } from "./costTracker.js";
 import { parseAiJson } from "./parseAiJson.js";
 
 export interface SemanticPair {
@@ -63,8 +63,8 @@ export async function batchSemanticSimilarity(
   }
 
   try {
-    if (!(await hasAiBudget())) {
-      console.log("Semantic similarity: daily AI budget exceeded, skipping");
+    if (!(await hasAiBudgetForSource("semantic_similarity"))) {
+      console.log("Semantic similarity: AI budget threshold reached, skipping");
       return [];
     }
 

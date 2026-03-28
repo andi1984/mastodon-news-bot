@@ -4,6 +4,41 @@ import createClient from "./db.js";
 const HAIKU_INPUT_COST_PER_M = 0.8;
 const HAIKU_OUTPUT_COST_PER_M = 4.0;
 
+// Hard daily limit (20 cents) - can be overridden by AI_DAILY_COST_LIMIT_USD env var
+export const DEFAULT_DAILY_LIMIT_USD = 0.20;
+
+// Priority levels for AI features
+export const AI_PRIORITY = {
+  CRITICAL: 0, // Direct user interaction (question_answerer)
+  HIGH: 1,     // Core functionality (semantic_similarity)
+  MEDIUM: 2,   // Nice-to-have scoring (regional_relevance)
+  LOW: 3,      // Optional enhancements (hashtag_generation, poll_analysis)
+} as const;
+
+export type AiPriorityLevel = typeof AI_PRIORITY[keyof typeof AI_PRIORITY];
+
+// Map AI sources to their priority levels
+const SOURCE_PRIORITIES: Record<string, AiPriorityLevel> = {
+  question_answerer: AI_PRIORITY.CRITICAL,
+  semantic_similarity: AI_PRIORITY.HIGH,
+  regional_relevance: AI_PRIORITY.MEDIUM,
+  hashtag_generation: AI_PRIORITY.LOW,
+  poll_analysis: AI_PRIORITY.LOW,
+};
+
+// Budget thresholds for each priority level (percentage of daily limit)
+// LOW is disabled at 50%, MEDIUM at 75%, HIGH at 90%, CRITICAL at 100%
+const PRIORITY_THRESHOLDS: Record<AiPriorityLevel, number> = {
+  [AI_PRIORITY.LOW]: 0.50,
+  [AI_PRIORITY.MEDIUM]: 0.75,
+  [AI_PRIORITY.HIGH]: 0.90,
+  [AI_PRIORITY.CRITICAL]: 1.00,
+};
+
+export function getAiPriority(source: string): AiPriorityLevel {
+  return SOURCE_PRIORITIES[source] ?? AI_PRIORITY.LOW;
+}
+
 export function calculateCost(
   inputTokens: number,
   outputTokens: number
@@ -44,16 +79,46 @@ export async function getTodaysCost(): Promise<number> {
   }
 }
 
-export async function hasAiBudget(): Promise<boolean> {
+function getDailyLimit(): number {
   const limitStr = process.env.AI_DAILY_COST_LIMIT_USD;
-  const limit = limitStr ? parseFloat(limitStr) : 0;
-
-  if (!limit || limit <= 0) {
-    return true; // no limit configured
+  if (limitStr) {
+    const parsed = parseFloat(limitStr);
+    if (!isNaN(parsed) && parsed > 0) {
+      return parsed;
+    }
   }
+  return DEFAULT_DAILY_LIMIT_USD;
+}
 
+export async function hasAiBudget(): Promise<boolean> {
+  const limit = getDailyLimit();
   const todaysCost = await getTodaysCost();
   return todaysCost < limit;
+}
+
+/**
+ * Check if there's budget for a specific priority level.
+ * Lower priority features get disabled first as budget runs out.
+ */
+export async function hasAiBudgetForPriority(priority: AiPriorityLevel): Promise<boolean> {
+  const limit = getDailyLimit();
+  const todaysCost = await getTodaysCost();
+
+  // Calculate what percentage of budget has been used
+  const usedPercentage = todaysCost / limit;
+
+  // Check if this priority level is still allowed
+  const threshold = PRIORITY_THRESHOLDS[priority];
+  return usedPercentage < threshold;
+}
+
+/**
+ * Check if there's budget for a specific AI source.
+ * Convenience wrapper that looks up the source's priority.
+ */
+export async function hasAiBudgetForSource(source: string): Promise<boolean> {
+  const priority = getAiPriority(source);
+  return hasAiBudgetForPriority(priority);
 }
 
 export async function logAiUsage(

@@ -5,7 +5,7 @@ const MockedAnthropic = jest.fn(() => ({
   messages: { create: mockMessagesCreate },
 }));
 
-const mockHasAiBudget = jest.fn().mockResolvedValue(true);
+const mockHasAiBudgetForSource = jest.fn().mockResolvedValue(true);
 const mockLogAiUsage = jest.fn().mockResolvedValue(undefined);
 
 jest.unstable_mockModule("@anthropic-ai/sdk", () => ({
@@ -13,7 +13,7 @@ jest.unstable_mockModule("@anthropic-ai/sdk", () => ({
 }));
 
 jest.unstable_mockModule("./costTracker", () => ({
-  hasAiBudget: mockHasAiBudget,
+  hasAiBudgetForSource: mockHasAiBudgetForSource,
   logAiUsage: mockLogAiUsage,
 }));
 
@@ -52,7 +52,7 @@ describe("scoreRegionalRelevance", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     process.env = { ...originalEnv, CLAUDE_API_KEY: "test-key" };
-    mockHasAiBudget.mockResolvedValue(true);
+    mockHasAiBudgetForSource.mockResolvedValue(true);
   });
 
   afterEach(() => {
@@ -129,7 +129,7 @@ describe("scoreRegionalRelevance", () => {
   });
 
   it("returns neutral multipliers when AI budget is exceeded", async () => {
-    mockHasAiBudget.mockResolvedValue(false);
+    mockHasAiBudgetForSource.mockResolvedValue(false);
 
     const articles = [
       { title: "Bundestagswahl", feedKey: "tagesschau" },

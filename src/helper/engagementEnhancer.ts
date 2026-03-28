@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { hasAiBudget, logAiUsage } from "./costTracker.js";
+import { hasAiBudgetForSource, logAiUsage } from "./costTracker.js";
 import { parseAiJson } from "./parseAiJson.js";
 
 /**
@@ -107,7 +107,7 @@ export async function analyzeForPoll(
   }
 
   try {
-    if (!(await hasAiBudget())) {
+    if (!(await hasAiBudgetForSource("poll_analysis"))) {
       return { isDebatable: false };
     }
 

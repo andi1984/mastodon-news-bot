@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { RegionalRelevanceSettings } from "../types/settings.js";
-import { hasAiBudget, logAiUsage } from "./costTracker.js";
+import { hasAiBudgetForSource, logAiUsage } from "./costTracker.js";
 import { parseAiJson } from "./parseAiJson.js";
 
 type RelevanceCategory = "local" | "regional" | "national" | "international";
@@ -73,9 +73,9 @@ export async function scoreRegionalRelevance(
   }
 
   try {
-    if (!(await hasAiBudget())) {
+    if (!(await hasAiBudgetForSource("regional_relevance"))) {
       console.warn(
-        "Regional relevance: daily AI budget exceeded, using neutral multipliers"
+        "Regional relevance: AI budget threshold reached, using neutral multipliers"
       );
       for (const item of toClassify) {
         result.set(item.index, 1.0);
