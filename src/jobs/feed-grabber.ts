@@ -1,15 +1,20 @@
+import "dotenv/config";
 import { parentPort } from "node:worker_threads";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const settings = require("../data/settings.json");
 
 import getFeed from "../helper/getFeed.js";
+import { filterFeedItemsByAge } from "../helper/feedItemFilter.js";
 import createClient from "../helper/db.js";
 import { sha256 } from "../helper/hash.js";
 import {
   processNewArticles,
   ArticleForMatching,
 } from "../helper/storyMatcher.js";
+
+// Filter out articles older than this (in hours) - prevents ingesting stale feed items
+const MAX_ARTICLE_AGE_HOURS = settings.min_freshness_hours || 24;
 
 // Single supabase client (singleton) with retry/timeout built in
 const supabase = createClient();
@@ -40,16 +45,21 @@ async function fetchFeedCandidates(
     // Hash feedURL once for this feed
     const tableId = sha256(feedURL);
 
-    return rssData.items.map((item: any) => {
-      const rawDate = item.pubDate ?? item.isoDate;
-      const parsed = rawDate ? new Date(rawDate) : new Date();
-      const pubDate = isNaN(parsed.getTime()) ? new Date() : parsed;
-      return {
-        hash: `${tableId}-${sha256(item.title)}-${sha256(item.link)}`,
-        data: { ...item, _feedKey: feedKey },
-        pub_date: pubDate.toISOString(),
-      };
-    });
+    // Filter out old articles
+    const { accepted, filteredCount } = filterFeedItemsByAge(
+      rssData.items,
+      MAX_ARTICLE_AGE_HOURS
+    );
+
+    if (filteredCount > 0) {
+      console.log(`[${feedKey}] Filtered out ${filteredCount} articles older than ${MAX_ARTICLE_AGE_HOURS}h`);
+    }
+
+    return accepted.map(({ item, pubDate }) => ({
+      hash: `${tableId}-${sha256(item.title ?? "")}-${sha256(item.link ?? "")}`,
+      data: { ...item, _feedKey: feedKey },
+      pub_date: pubDate.toISOString(),
+    }));
   } catch (err) {
     console.error(`[${feedKey}] Unexpected error: ${err}`);
     return [];
