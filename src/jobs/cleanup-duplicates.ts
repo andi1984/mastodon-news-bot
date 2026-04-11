@@ -15,6 +15,7 @@ import "dotenv/config";
 import { parentPort } from "node:worker_threads";
 import process from "node:process";
 import getInstance from "../helper/login.js";
+import { normalizeTootContent } from "../helper/contentNormalizer.js";
 import type { mastodon } from "masto";
 
 // Configuration
@@ -70,24 +71,6 @@ async function withRetry<T>(
       }
     }
   }
-}
-
-/**
- * Strip HTML and normalize content for comparison
- */
-function normalizeContent(html: string | undefined | null): string {
-  if (!html) return "";
-  return html
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
 }
 
 /**
@@ -164,7 +147,7 @@ async function findAndCleanDuplicates(): Promise<{
     // Skip recent toots (avoid race conditions)
     if (!isOldEnough(status)) continue;
 
-    const normalized = normalizeContent(status.content);
+    const normalized = normalizeTootContent(status.content);
     // Skip very short content (likely different context)
     if (normalized.length < 30) continue;
 
@@ -199,7 +182,7 @@ async function findAndCleanDuplicates(): Promise<{
   let failed = 0;
 
   outerLoop: for (const group of duplicateGroups) {
-    const preview = normalizeContent(group.keep.content).slice(0, 50);
+    const preview = normalizeTootContent(group.keep.content).slice(0, 50);
     console.log(
       `[cleanup-duplicates] Group: "${preview}..." (keeping ${group.keep.id}, removing ${group.remove.length})`
     );

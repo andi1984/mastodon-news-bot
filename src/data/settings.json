@@ -107,7 +107,7 @@
   "story_retention_days": 3,
   "untooted_story_retention_days": 1,
   "ai_usage_retention_days": 14,
-  "tooted_hash_retention_days": 7,
+  "tooted_hash_retention_days": 30,
   "qa_enabled": true,
   "qa_max_results": 5,
   "qa_min_text_length": 10,
