@@ -15,6 +15,7 @@ import { scoreRegionalRelevance } from "../helper/regionalRelevance.js";
 import { markStoryTooted, getStoryTootId } from "../helper/storyMatcher.js";
 import { analyzeForPoll, PollSuggestion } from "../helper/engagementEnhancer.js";
 import { generateHashtags } from "../helper/hashtagGenerator.js";
+import { scoreFeedItem } from "../helper/feedItemScorer.js";
 import {
   isInCooldown,
   setCooldown,
@@ -46,21 +47,6 @@ const STORY_THREADING_ENABLED =
   (settings as any).story_threading_enabled ?? true;
 const POLL_ENABLED = (settings as any).poll_enabled ?? true;
 const POLL_CHANCE = (settings as any).poll_chance ?? 0.15; // 15% of eligible posts
-
-function scoreFeedItem(
-  feedKey: string | undefined,
-  pubDate: string | undefined
-): number {
-  const priority = feedKey ? (FEED_PRIORITIES[feedKey] ?? 0.5) : 0.5;
-
-  if (!pubDate) return priority * 0.5;
-
-  const ageMs = Date.now() - new Date(pubDate).getTime();
-  const ageHours = ageMs / (1000 * 60 * 60);
-  const freshness = Math.max(0, 1 - ageHours / MIN_FRESHNESS_HOURS);
-
-  return priority * freshness;
-}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -209,7 +195,7 @@ type StoryInfo = {
   for (const row of newStoryArticles) {
     const article: FeedItem = row.data;
     const feedKey = row.data._feedKey as string | undefined;
-    const score = scoreFeedItem(feedKey, row.pub_date);
+    const score = scoreFeedItem(feedKey, row.pub_date, FEED_PRIORITIES, MIN_FRESHNESS_HOURS);
     const clusterArticle: ClusterArticle = {
       id: row.id,
       article,
@@ -232,7 +218,7 @@ type StoryInfo = {
     article: row.data,
     feedKey: row.data._feedKey,
     pubDate: row.pub_date,
-    score: scoreFeedItem(row.data._feedKey, row.pub_date),
+    score: scoreFeedItem(row.data._feedKey, row.pub_date, FEED_PRIORITIES, MIN_FRESHNESS_HOURS),
   }));
 
   // 5. Apply regional relevance scoring
@@ -517,7 +503,7 @@ type StoryInfo = {
         article: row.data,
         feedKey: row.data._feedKey,
         pubDate: row.pub_date,
-        score: scoreFeedItem(row.data._feedKey, row.pub_date),
+        score: scoreFeedItem(row.data._feedKey, row.pub_date, FEED_PRIORITIES, MIN_FRESHNESS_HOURS),
       }));
 
       // Check if any articles have new links (not in original toot)
