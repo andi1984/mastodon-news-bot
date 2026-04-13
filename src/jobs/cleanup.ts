@@ -10,6 +10,7 @@ import {
   removePinRecord,
   cleanupExpiredState,
 } from "../helper/botState.js";
+import { cleanupTootedArticles as cleanupTootedArticlesHelper } from "../helper/cleanupHelpers.js";
 
 const supabase = createClient();
 
@@ -36,17 +37,7 @@ interface CleanupStats {
 }
 
 async function cleanupTootedArticles(): Promise<number> {
-  const { data, error } = await supabase
-    .from(settings.db_table)
-    .delete()
-    .eq("tooted", true)
-    .select("id");
-
-  if (error) {
-    console.error(`Cleanup tooted articles: ${error.message}`);
-    return 0;
-  }
-  return data?.length ?? 0;
+  return cleanupTootedArticlesHelper(supabase);
 }
 
 async function cleanupStaleArticles(): Promise<number> {

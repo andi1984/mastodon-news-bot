@@ -23,6 +23,7 @@ import {
   recordLastToot,
   recordPinnedToot,
 } from "../helper/botState.js";
+import { saveHashesAndFinalize } from "../helper/hashPersistence.js";
 
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
@@ -162,23 +163,7 @@ type StoryInfo = {
       followUpGroups.get(article.story_id)!.push(article);
     } else if (storyInfo.tooted) {
       // Story tooted but threading disabled - save hash and delete immediately
-      const { data: articleData } = await db
-        .from(settings.db_table)
-        .select("hash")
-        .eq("id", article.id)
-        .single();
-
-      if (articleData?.hash) {
-        await db.from("tooted_hashes").upsert({ hash: articleData.hash }, { onConflict: "hash" });
-      }
-
-      const { error } = await db
-        .from(settings.db_table)
-        .delete()
-        .eq("id", article.id);
-      if (error) {
-        console.error(`Failed to delete suppressed article ${article.id}: ${error.message}`);
-      }
+      await saveHashesAndFinalize(db, [article.id], "suppress-threaded");
     } else {
       // Story not yet posted - queue for posting
       newStoryArticles.push(article);
@@ -440,39 +425,13 @@ type StoryInfo = {
         await markStoryTooted(story.storyId, tootResult.id, originalLinks);
       }
 
-      // Save hashes to tooted_hashes table before deleting (prevents re-tooting)
       const articleIds = story.articles.map((a) => a.id);
-      const { data: articlesToDelete } = await db
-        .from(settings.db_table)
-        .select("hash")
-        .in("id", articleIds);
+      await saveHashesAndFinalize(db, articleIds, "main-toot");
 
-      if (articlesToDelete && articlesToDelete.length > 0) {
-        const hashRecords = articlesToDelete.map((a: { hash: string }) => ({
-          hash: a.hash,
-        }));
-        await db.from("tooted_hashes").upsert(hashRecords, { onConflict: "hash" });
-      }
-
-      // Delete articles immediately after successful toot (aggressive cleanup)
-      const { error: errorOnDelete } = await db
-        .from(settings.db_table)
-        .delete()
-        .in("id", articleIds);
-
-      if (errorOnDelete) {
-        console.error(`Failed to delete tooted articles: ${errorOnDelete.message}`);
-        // Fallback: mark as tooted so cleanup job handles it
-        await db
-          .from(settings.db_table)
-          .update({ tooted: true })
-          .in("id", articleIds);
-      } else {
-        const sourceCount = new Set(story.articles.map((a) => a.feedKey)).size;
-        console.log(
-          `Tooted & deleted: ${articleIds.length} articles from ${sourceCount} sources (primary=${primary.feedKey}${story.isBreaking ? ", BREAKING" : ""}${pollConfig ? ", WITH POLL" : ""})`
-        );
-      }
+      const sourceCount = new Set(story.articles.map((a) => a.feedKey)).size;
+      console.log(
+        `Tooted: ${articleIds.length} articles from ${sourceCount} sources (primary=${primary.feedKey}${story.isBreaking ? ", BREAKING" : ""}${pollConfig ? ", WITH POLL" : ""})`
+      );
 
       await sleep(5000);
     } catch (e) {
@@ -514,24 +473,8 @@ type StoryInfo = {
 
       if (newLinks.length === 0) {
         // All links are duplicates - no value in posting a quote
-        // Save hashes and delete these articles silently
         const articleIds = articles.map((a) => a.id);
-        const { data: articlesToDelete } = await db
-          .from(settings.db_table)
-          .select("hash")
-          .in("id", articleIds);
-
-        if (articlesToDelete && articlesToDelete.length > 0) {
-          const hashRecords = articlesToDelete.map((a: { hash: string }) => ({
-            hash: a.hash,
-          }));
-          await db.from("tooted_hashes").upsert(hashRecords, { onConflict: "hash" });
-        }
-
-        await db
-          .from(settings.db_table)
-          .delete()
-          .in("id", articleIds);
+        await saveHashesAndFinalize(db, articleIds, "thread-skip-duplicate");
         console.log(
           `Skipped thread reply: ${articleIds.length} articles with duplicate links for story ${storyId.slice(0, 8)}...`
         );
@@ -553,53 +496,20 @@ type StoryInfo = {
         language: "de",
       });
 
-      // Save hashes to tooted_hashes table before deleting (prevents re-tooting)
       const articleIds = articles.map((a) => a.id);
-      const { data: articlesToDelete } = await db
-        .from(settings.db_table)
-        .select("hash")
-        .in("id", articleIds);
-
-      if (articlesToDelete && articlesToDelete.length > 0) {
-        const hashRecords = articlesToDelete.map((a: { hash: string }) => ({
-          hash: a.hash,
-        }));
-        await db.from("tooted_hashes").upsert(hashRecords, { onConflict: "hash" });
-      }
-
-      // Delete articles immediately after successful thread reply
-      await db
-        .from(settings.db_table)
-        .delete()
-        .in("id", articleIds);
+      await saveHashesAndFinalize(db, articleIds, "thread-reply");
 
       console.log(
-        `Threaded reply & deleted: ${articleIds.length} articles to story ${storyId.slice(0, 8)}...`
+        `Threaded reply: ${articleIds.length} articles to story ${storyId.slice(0, 8)}...`
       );
 
       threadCount++;
       await sleep(3000);
     } catch (e) {
       console.error(`Failed to post thread reply: ${e}`);
-      // Still delete to avoid retry loops (content was problematic anyway)
-      // Also save hashes to prevent re-ingestion
+      // Suppress the article to avoid retry loops (content was problematic anyway)
       const articleIds = articleRows.map((r) => r.id);
-      const { data: articlesToDelete } = await db
-        .from(settings.db_table)
-        .select("hash")
-        .in("id", articleIds);
-
-      if (articlesToDelete && articlesToDelete.length > 0) {
-        const hashRecords = articlesToDelete.map((a: { hash: string }) => ({
-          hash: a.hash,
-        }));
-        await db.from("tooted_hashes").upsert(hashRecords, { onConflict: "hash" });
-      }
-
-      await db
-        .from(settings.db_table)
-        .delete()
-        .in("id", articleIds);
+      await saveHashesAndFinalize(db, articleIds, "thread-reply-error");
     }
   }
 
