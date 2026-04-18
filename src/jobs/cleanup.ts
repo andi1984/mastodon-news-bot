@@ -10,7 +10,10 @@ import {
   removePinRecord,
   cleanupExpiredState,
 } from "../helper/botState.js";
-import { cleanupTootedArticles as cleanupTootedArticlesHelper } from "../helper/cleanupHelpers.js";
+import {
+  cleanupTootedArticles as cleanupTootedArticlesHelper,
+  cleanupStaleArticles as cleanupStaleArticlesHelper,
+} from "../helper/cleanupHelpers.js";
 
 const supabase = createClient();
 
@@ -41,40 +44,7 @@ async function cleanupTootedArticles(): Promise<number> {
 }
 
 async function cleanupStaleArticles(): Promise<number> {
-  const cutoff = new Date();
-  cutoff.setHours(cutoff.getHours() - STALE_UNTOOTED_RETENTION_HOURS);
-
-  // Persist hashes to tooted_hashes BEFORE deleting so they stay deduped
-  // even if the item keeps reappearing in the RSS feed (event feeds etc.).
-  // Without this, stale untooted items are silently re-ingested next grabber run.
-  const { data, error } = await supabase
-    .from(settings.db_table)
-    .delete()
-    .eq("tooted", false)
-    .or(`pub_date.lt.${cutoff.toISOString()},created_at.lt.${cutoff.toISOString()}`)
-    .select("id, hash");
-
-  if (error) {
-    console.error(`Cleanup stale articles: ${error.message}`);
-    return 0;
-  }
-
-  const rows = (data ?? []) as { id: string; hash: string | null }[];
-  const hashRecords = rows
-    .map((r) => r.hash)
-    .filter((h): h is string => !!h)
-    .map((hash) => ({ hash }));
-
-  if (hashRecords.length > 0) {
-    const { error: hashErr } = await supabase
-      .from("tooted_hashes")
-      .upsert(hashRecords, { onConflict: "hash" });
-    if (hashErr) {
-      console.error(`Cleanup stale: failed to persist hashes: ${hashErr.message}`);
-    }
-  }
-
-  return rows.length;
+  return cleanupStaleArticlesHelper(supabase, STALE_UNTOOTED_RETENTION_HOURS);
 }
 
 async function cleanupTootedStories(): Promise<number> {

@@ -16,6 +16,8 @@
     "cleanup-replies": "tsx scripts/cleanup-auto-replies.ts",
     "cleanup-duplicates": "tsx scripts/cleanup-duplicate-toots.ts",
     "fix-story-toots": "tsx src/scripts/fix-duplicate-toots.ts",
+    "inspect-duplicate-urls": "tsx src/scripts/inspect-duplicate-urls.ts",
+    "backfill-dedup-hashes": "tsx src/scripts/backfill-dedup-hashes.ts",
     "story-thread-fixer": "tsx src/jobs/story-thread-fixer.ts",
     "daily-digest": "tsx src/jobs/daily-digest.ts",
     "weekly-digest": "tsx src/jobs/weekly-digest.ts",
