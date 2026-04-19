@@ -10,21 +10,10 @@ export interface QASettings {
   qa_header_text?: string;
 }
 
-const SYSTEM_PROMPT = `Du bist ein Assistent für einen Nachrichtenbot im Saarland.
-Der Nutzer stellt eine Frage oder nennt ein Thema. Generiere Suchbegriffe für eine PostgreSQL-Volltextsuche (to_tsquery mit der Konfiguration 'german').
+const SYSTEM_PROMPT = `Extrahiere 1-7 Suchbegriffe aus der Nutzerfrage für eine deutsche PostgreSQL-Volltextsuche (Stemming aktiv).
+Einzelne Wörter in natürlicher Form. Bei Komposita auch Teile nennen (z.B. "Straßenbau","Straße","Bau").
 
-Antworte mit einem JSON-Objekt:
-{
-  "keywords": ["..."]
-}
-
-keywords (1-7): Suchbegriffe als einzelne Wörter.
-Die Volltextsuche nutzt deutsches Stemming, d.h. "Unfall" matcht automatisch "Unfälle", "Verkehrsunfall" usw.
-Du musst daher KEINE Varianten oder Stammformen angeben – ein Wort genügt.
-Verwende die natürliche Form des Wortes (z.B. "Unfall", nicht "Unf").
-Bei Komposita gib sowohl das Kompositum als auch die Teile an: "Straßenbau", "Straße", "Bau".
-
-Nur das JSON-Objekt ausgeben. Keine Erklärungen.`;
+Nur JSON: {"keywords":["..."]}`;
 
 export function sanitizeHtml(html: string): string {
   let text = html.replace(/<[^>]*>/g, "");
@@ -63,7 +52,7 @@ export async function extractKeywords(text: string): Promise<string[]> {
     const client = new Anthropic({ apiKey });
     const response = await client.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 256,
+      max_tokens: 128,
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: text }],
     });

@@ -105,10 +105,12 @@ export async function findMatchingStory(
     return bestMatch;
   }
 
-  // Check uncertain candidates with batch semantic similarity (limit to top 5 by score)
+  // Check uncertain candidates with batch semantic similarity (top 3 by score).
+  // Cap kept low to limit AI spend; the Jaccard pre-filter already catches
+  // most true matches, and low-ranking uncertain candidates are rarely right.
   if (uncertainCandidates.length > 0) {
     uncertainCandidates.sort((a, b) => b.score - a.score);
-    const toCheck = uncertainCandidates.slice(0, 5);
+    const toCheck = uncertainCandidates.slice(0, 3);
 
     // Build batch request
     const pairs: SemanticPair[] = toCheck.map((candidate, idx) => ({

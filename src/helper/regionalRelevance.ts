@@ -2,23 +2,24 @@ import Anthropic from "@anthropic-ai/sdk";
 import { RegionalRelevanceSettings } from "../types/settings.js";
 import { hasAiBudgetForSource, logAiUsage } from "./costTracker.js";
 import { parseAiJson } from "./parseAiJson.js";
-
-type RelevanceCategory = "local" | "regional" | "national" | "international";
+import {
+  getCachedRegionalCategories,
+  setCachedRegionalCategories,
+  type RelevanceCategory,
+} from "./aiCache.js";
 
 export interface ArticleInput {
   title: string;
   feedKey?: string;
 }
 
-const SYSTEM_PROMPT = `Du bist ein Klassifikator für regionale Nachrichtenrelevanz im Saarland.
-Ordne jeden Artikel einer Kategorie zu:
-- "local": Direkter Bezug zum Saarland (Orte, Personen, Institutionen im Saarland)
-- "regional": Bezug zur Großregion SaarLorLux / Grenzregion (Luxemburg, Lothringen, Westpfalz, Trier)
-- "national": Deutsche Nachrichten ohne spezifischen Saarland-Bezug
-- "international": Weltnachrichten ohne Saarland-Bezug
+const SYSTEM_PROMPT = `Klassifiziere Saarland-Nachrichten:
+- local: Saarland-Bezug
+- regional: SaarLorLux-Grenzregion (Luxemburg, Lothringen, Westpfalz, Trier)
+- national: DE ohne Saarland
+- international: Welt ohne Saarland
 
-Antworte ausschließlich mit einem JSON-Array: [{"i":0,"c":"local"},...]
-Keine Erklärungen, nur JSON.`;
+Nur JSON-Array: [{"i":0,"c":"local"},...]`;
 
 function buildUserPrompt(articles: { index: number; title: string }[]): string {
   const lines = articles.map((a) => `${a.index}: ${a.title}`);
@@ -61,12 +62,32 @@ export async function scoreRegionalRelevance(
     return result;
   }
 
+  // DB cache: skip articles we've already classified in a previous run.
+  const cached = await getCachedRegionalCategories(toClassify.map((t) => t.title));
+  const stillToClassify: { index: number; title: string }[] = [];
+  for (const item of toClassify) {
+    const hit = cached.get(item.title);
+    if (hit) {
+      result.set(item.index, categoryToMultiplier(hit, config));
+    } else {
+      stillToClassify.push(item);
+    }
+  }
+  if (cached.size > 0) {
+    console.log(
+      `Regional relevance: ${cached.size}/${toClassify.length} cache hits, ${stillToClassify.length} to classify`
+    );
+  }
+  if (stillToClassify.length === 0) {
+    return result;
+  }
+
   const apiKey = process.env.CLAUDE_API_KEY;
   if (!apiKey) {
     console.warn(
       "Regional relevance: CLAUDE_API_KEY not set, using neutral multipliers"
     );
-    for (const item of toClassify) {
+    for (const item of stillToClassify) {
       result.set(item.index, 1.0);
     }
     return result;
@@ -77,7 +98,7 @@ export async function scoreRegionalRelevance(
       console.warn(
         "Regional relevance: AI budget threshold reached, using neutral multipliers"
       );
-      for (const item of toClassify) {
+      for (const item of stillToClassify) {
         result.set(item.index, 1.0);
       }
       return result;
@@ -86,9 +107,9 @@ export async function scoreRegionalRelevance(
     const client = new Anthropic({ apiKey });
     const response = await client.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 256,
+      max_tokens: 160,
       system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: buildUserPrompt(toClassify) }],
+      messages: [{ role: "user", content: buildUserPrompt(stillToClassify) }],
     });
 
     logAiUsage(
@@ -108,14 +129,23 @@ export async function scoreRegionalRelevance(
       international: 0,
     };
 
+    const toCache: { title: string; category: RelevanceCategory }[] = [];
+    const indexToTitle = new Map(
+      stillToClassify.map((t) => [t.index, t.title])
+    );
     for (const entry of parsed) {
       const multiplier = categoryToMultiplier(entry.c, config);
       result.set(entry.i, multiplier);
       if (entry.c in counts) counts[entry.c]++;
+      const title = indexToTitle.get(entry.i);
+      if (title) toCache.push({ title, category: entry.c });
     }
 
+    // Persist fresh classifications so future runs hit the cache.
+    await setCachedRegionalCategories(toCache);
+
     // Fill any missing indices with neutral multiplier
-    for (const item of toClassify) {
+    for (const item of stillToClassify) {
       if (!result.has(item.index)) {
         result.set(item.index, 1.0);
       }
@@ -132,8 +162,10 @@ export async function scoreRegionalRelevance(
     console.error(
       `Regional relevance API call failed, using neutral multipliers: ${err}`
     );
-    for (const item of toClassify) {
-      result.set(item.index, 1.0);
+    for (const item of stillToClassify) {
+      if (!result.has(item.index)) {
+        result.set(item.index, 1.0);
+      }
     }
   }
 

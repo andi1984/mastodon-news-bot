@@ -177,8 +177,8 @@ describe("AI_PRIORITY", () => {
 });
 
 describe("DEFAULT_DAILY_LIMIT_USD", () => {
-  it("is set to 0.20 (20 cents)", () => {
-    expect(DEFAULT_DAILY_LIMIT_USD).toBe(0.20);
+  it("is set to 0.15 (15 cents)", () => {
+    expect(DEFAULT_DAILY_LIMIT_USD).toBe(0.15);
   });
 });
 
@@ -230,8 +230,8 @@ describe("hasAiBudgetForPriority", () => {
     expect(await hasAiBudgetForPriority(AI_PRIORITY.CRITICAL)).toBe(true);
   });
 
-  it("disables LOW priority at 50% budget used", async () => {
-    mockRpc.mockResolvedValue({ data: 0.10, error: null }); // 50% of 0.20
+  it("disables LOW priority at 30% budget used", async () => {
+    mockRpc.mockResolvedValue({ data: 0.06, error: null }); // 30% of 0.20
 
     expect(await hasAiBudgetForPriority(AI_PRIORITY.LOW)).toBe(false);
     expect(await hasAiBudgetForPriority(AI_PRIORITY.MEDIUM)).toBe(true);
@@ -239,8 +239,8 @@ describe("hasAiBudgetForPriority", () => {
     expect(await hasAiBudgetForPriority(AI_PRIORITY.CRITICAL)).toBe(true);
   });
 
-  it("disables MEDIUM priority at 76% budget used", async () => {
-    mockRpc.mockResolvedValue({ data: 0.152, error: null }); // 76% of 0.20
+  it("disables MEDIUM priority at 56% budget used", async () => {
+    mockRpc.mockResolvedValue({ data: 0.112, error: null }); // 56% of 0.20
 
     expect(await hasAiBudgetForPriority(AI_PRIORITY.LOW)).toBe(false);
     expect(await hasAiBudgetForPriority(AI_PRIORITY.MEDIUM)).toBe(false);
@@ -248,8 +248,8 @@ describe("hasAiBudgetForPriority", () => {
     expect(await hasAiBudgetForPriority(AI_PRIORITY.CRITICAL)).toBe(true);
   });
 
-  it("disables HIGH priority at 91% budget used", async () => {
-    mockRpc.mockResolvedValue({ data: 0.182, error: null }); // 91% of 0.20
+  it("disables HIGH priority at 76% budget used", async () => {
+    mockRpc.mockResolvedValue({ data: 0.152, error: null }); // 76% of 0.20
 
     expect(await hasAiBudgetForPriority(AI_PRIORITY.LOW)).toBe(false);
     expect(await hasAiBudgetForPriority(AI_PRIORITY.MEDIUM)).toBe(false);
@@ -268,9 +268,10 @@ describe("hasAiBudgetForPriority", () => {
 
   it("uses default limit when env var not set", async () => {
     delete process.env.AI_DAILY_COST_LIMIT_USD;
-    mockRpc.mockResolvedValue({ data: 0.10, error: null }); // 50% of default 0.20
+    mockRpc.mockResolvedValue({ data: 0.10, error: null }); // 67% of default 0.15
 
     expect(await hasAiBudgetForPriority(AI_PRIORITY.LOW)).toBe(false);
+    expect(await hasAiBudgetForPriority(AI_PRIORITY.MEDIUM)).toBe(false);
     expect(await hasAiBudgetForPriority(AI_PRIORITY.CRITICAL)).toBe(true);
   });
 });
