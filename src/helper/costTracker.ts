@@ -4,8 +4,9 @@ import createClient from "./db.js";
 const HAIKU_INPUT_COST_PER_M = 0.8;
 const HAIKU_OUTPUT_COST_PER_M = 4.0;
 
-// Hard daily limit (20 cents) - can be overridden by AI_DAILY_COST_LIMIT_USD env var
-export const DEFAULT_DAILY_LIMIT_USD = 0.20;
+// Hard daily limit (15 cents) - can be overridden by AI_DAILY_COST_LIMIT_USD env var.
+// Sized so the monthly bill stays under ~€4.50 even at full daily usage.
+export const DEFAULT_DAILY_LIMIT_USD = 0.15;
 
 // Priority levels for AI features
 export const AI_PRIORITY = {
@@ -26,12 +27,13 @@ const SOURCE_PRIORITIES: Record<string, AiPriorityLevel> = {
   poll_analysis: AI_PRIORITY.LOW,
 };
 
-// Budget thresholds for each priority level (percentage of daily limit)
-// LOW is disabled at 50%, MEDIUM at 75%, HIGH at 90%, CRITICAL at 100%
+// Budget thresholds for each priority level (percentage of daily limit).
+// Stricter than before so cheap features get shed earlier, keeping budget
+// for user-facing Q&A replies.
 const PRIORITY_THRESHOLDS: Record<AiPriorityLevel, number> = {
-  [AI_PRIORITY.LOW]: 0.50,
-  [AI_PRIORITY.MEDIUM]: 0.75,
-  [AI_PRIORITY.HIGH]: 0.90,
+  [AI_PRIORITY.LOW]: 0.30,
+  [AI_PRIORITY.MEDIUM]: 0.55,
+  [AI_PRIORITY.HIGH]: 0.75,
   [AI_PRIORITY.CRITICAL]: 1.00,
 };
 

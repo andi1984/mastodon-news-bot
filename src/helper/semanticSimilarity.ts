@@ -1,6 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { hasAiBudgetForSource, logAiUsage } from "./costTracker.js";
 import { parseAiJson } from "./parseAiJson.js";
+import {
+  getCachedSemanticScores,
+  setCachedSemanticScores,
+  _pairKeyForTesting as pairKey,
+} from "./aiCache.js";
 
 export interface SemanticPair {
   indexA: number;
@@ -15,34 +20,12 @@ export interface SemanticResult {
   score: number;
 }
 
-const BATCH_SYSTEM_PROMPT = `Du entscheidest ob zwei Nachrichtenartikel über DASSELBE SPEZIFISCHE EREIGNIS berichten.
+const BATCH_SYSTEM_PROMPT = `Bewerte ob zwei Nachrichten DASSELBE spezifische Ereignis beschreiben.
+Gleiches Ereignis (0.85-1.0): selber Vorfall, selber Ort UND Thema, gleiche Personen im gleichen Kontext.
+Verschiedene Ereignisse (0.0-0.3): anderer Ort, anderes Thema, oder nur Ort gemeinsam.
+Im Zweifel unter 0.3.
 
-WICHTIG: Zwei Artikel gehören NUR zusammen wenn sie über EXAKT DASSELBE berichten:
-- Selber Vorfall (gleicher Brand, gleicher Unfall, gleiche Ankündigung)
-- Selber Ort UND selbes Thema
-- Gleiche handelnde Personen im gleichen Kontext
-
-GLEICHE GESCHICHTE (score 0.85-1.0):
-✓ "Feuer zerstört Lagerhalle Homburg" + "Brand in Homburger Lagerhalle" = 0.9
-✓ "Anke Rehlinger kündigt Wirtschaftsplan an" + "Ministerpräsidentin stellt Maßnahmen vor" = 0.85
-✓ "Unfall A1 Saarbrücken 3 Verletzte" + "A1: Schwerer Unfall bei Saarbrücken" = 0.9
-
-VERSCHIEDENE GESCHICHTEN (score 0.0-0.3):
-✗ Zwei verschiedene Brände (anderer Ort) = 0.2
-✗ Zwei verschiedene Unfälle (anderer Ort/Tag) = 0.2
-✗ Wirtschaftsnachrichten + Feuerwehreinsatz = 0.0
-✗ Zugverkehr + Hausbrand = 0.0
-✗ Politik + Kriminalität = 0.1
-✗ Gleicher Ort aber anderes Thema = 0.1
-
-NIEMALS zusammenführen:
-- Artikel über komplett unterschiedliche Themen
-- Artikel die nur den Ort gemeinsam haben
-- Artikel über ähnliche aber SEPARATE Ereignisse
-
-Im Zweifel: Score unter 0.3 vergeben!
-
-Antworte NUR mit JSON-Array: [{"a":0,"b":1,"s":0.85},...]`;
+Nur JSON-Array: [{"a":0,"b":1,"s":0.85},...]`;
 
 /**
  * Batch semantic similarity comparison using Claude.
@@ -63,21 +46,46 @@ export async function batchSemanticSimilarity(
   }
 
   try {
-    if (!(await hasAiBudgetForSource("semantic_similarity"))) {
-      console.log("Semantic similarity: AI budget threshold reached, skipping");
-      return [];
+    // DB cache: skip pairs we've already scored previously.
+    const cachedScores = await getCachedSemanticScores(pairs);
+    const results: SemanticResult[] = [];
+    const uncachedPairs: SemanticPair[] = [];
+    for (const p of pairs) {
+      const hit = cachedScores.get(pairKey(p.titleA, p.titleB));
+      if (typeof hit === "number") {
+        results.push({
+          indexA: p.indexA,
+          indexB: p.indexB,
+          score: Math.max(0, Math.min(1, hit)),
+        });
+      } else {
+        uncachedPairs.push(p);
+      }
+    }
+    if (cachedScores.size > 0) {
+      console.log(
+        `Semantic similarity: ${cachedScores.size}/${pairs.length} cache hits, ${uncachedPairs.length} to score`
+      );
+    }
+    if (uncachedPairs.length === 0) {
+      return results;
     }
 
-    // Build prompt with numbered pairs
-    const pairLines = pairs.map(
+    if (!(await hasAiBudgetForSource("semantic_similarity"))) {
+      console.log("Semantic similarity: AI budget threshold reached, skipping");
+      return results;
+    }
+
+    // Build prompt with numbered pairs (indices into uncachedPairs)
+    const pairLines = uncachedPairs.map(
       (p, i) => `${i}: "${p.titleA}" vs "${p.titleB}"`
     );
-    const userPrompt = `Bewerte diese ${pairs.length} Artikelpaare:\n${pairLines.join("\n")}`;
+    const userPrompt = `Bewerte diese ${uncachedPairs.length} Artikelpaare:\n${pairLines.join("\n")}`;
 
     const client = new Anthropic({ apiKey });
     const response = await client.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: Math.min(pairs.length * 20 + 50, 1024),
+      max_tokens: Math.min(uncachedPairs.length * 20 + 50, 1024),
       system: BATCH_SYSTEM_PROMPT,
       messages: [{ role: "user", content: userPrompt }],
     });
@@ -94,21 +102,26 @@ export async function batchSemanticSimilarity(
     // Parse JSON response
     const parsed = parseAiJson<{ a: number; b: number; s: number }[]>(text);
 
-    // Map back to original indices
-    const results: SemanticResult[] = [];
+    // Map back to original indices and collect for cache persist
+    const toCache: { titleA: string; titleB: string; score: number }[] = [];
     for (const entry of parsed) {
-      const pairIndex = entry.a; // Index in our pairs array
-      if (pairIndex >= 0 && pairIndex < pairs.length) {
+      const pairIndex = entry.a; // Index in uncachedPairs array
+      if (pairIndex >= 0 && pairIndex < uncachedPairs.length) {
+        const clamped = Math.max(0, Math.min(1, entry.s));
+        const p = uncachedPairs[pairIndex];
         results.push({
-          indexA: pairs[pairIndex].indexA,
-          indexB: pairs[pairIndex].indexB,
-          score: Math.max(0, Math.min(1, entry.s)), // Clamp to [0,1]
+          indexA: p.indexA,
+          indexB: p.indexB,
+          score: clamped,
         });
+        toCache.push({ titleA: p.titleA, titleB: p.titleB, score: clamped });
       }
     }
 
+    await setCachedSemanticScores(toCache);
+
     console.log(
-      `Semantic similarity: scored ${results.length}/${pairs.length} pairs`
+      `Semantic similarity: scored ${results.length}/${pairs.length} pairs (fresh=${toCache.length}, cached=${cachedScores.size})`
     );
     return results;
   } catch (err) {

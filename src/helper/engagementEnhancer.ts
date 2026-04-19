@@ -47,35 +47,14 @@ export interface EngagementAnalysis {
   poll?: PollSuggestion;
 }
 
-const POLL_SYSTEM_PROMPT = `Du analysierst Nachrichtenartikel für einen Saarland-News-Bot auf Mastodon.
+const POLL_SYSTEM_PROMPT = `Prüfe ob dieser Saarland-Artikel debattierbar ist (Politik, Gesellschaft, Zukunftspläne, Meinungsthemen).
+NICHT debattierbar: Unfälle, Verbrechen, Fakten, Ankündigungen, Pressemitteilungen.
 
-Bestimme, ob der Artikel ein debattierbares Thema behandelt, bei dem eine Umfrage sinnvoll wäre.
+Wenn debattierbar: kurze neutrale Frage auf Deutsch mit 2-4 Optionen (max 25 Zeichen, nicht wertend).
 
-Geeignete Themen für Umfragen:
-- Politische Entscheidungen (z.B. Bauvorhaben, Gesetze)
-- Gesellschaftliche Debatten
-- Zukunftspläne für die Region
-- Meinungsfragen zu lokalen Themen
-
-NICHT geeignet:
-- Unfälle, Verbrechen, Tragödien
-- Reine Fakten-Nachrichten
-- Veranstaltungsankündigungen
-- Pressemitteilungen
-
-Wenn geeignet, erstelle eine kurze, neutrale Umfragefrage mit 2-4 Antwortoptionen.
-WICHTIG: Frage und Optionen MÜSSEN auf Deutsch sein!
-Die Optionen sollten verschiedene Meinungen abdecken, nicht wertend sein.
-Halte die Optionen kurz (max. 25 Zeichen).
-
-Beispiel für gute Optionen:
-- "Finde ich gut", "Bin dagegen", "Abwarten"
-- "Ja, unbedingt", "Nein", "Mir egal"
-
-Antworte NUR mit JSON:
-{"debatable": true/false, "poll": {"q": "Frage auf Deutsch?", "opts": ["Option 1", "Option 2", ...]}}
-
-Wenn nicht debattierbar: {"debatable": false}`;
+Nur JSON:
+{"debatable":true,"poll":{"q":"Frage?","opts":["Opt1","Opt2"]}}
+oder {"debatable":false}`;
 
 /**
  * Analyze if an article topic is debatable and could benefit from a poll.
@@ -114,7 +93,7 @@ export async function analyzeForPoll(
     const client = new Anthropic({ apiKey });
     const response = await client.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 200,
+      max_tokens: 150,
       system: POLL_SYSTEM_PROMPT,
       messages: [{ role: "user", content: `Artikel: "${title}"` }],
     });

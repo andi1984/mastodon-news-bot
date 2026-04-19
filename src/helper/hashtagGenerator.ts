@@ -99,8 +99,9 @@ export async function generateHashtags(
     }
   }
 
-  // 3. AI fallback if we have < 3 tags and budget available
-  if (hashtags.length < 3) {
+  // 3. AI fallback only when rule-based matching found NO content tags.
+  // Base feed hashtags don't count as content, so compare against baseHashtags length.
+  if (topicMatches.length === 0 && hashtags.length < MAX_HASHTAGS) {
     const aiTags = await getAiHashtags(title, hashtags);
     for (const tag of aiTags) {
       if (!hashtags.includes(tag) && hashtags.length < MAX_HASHTAGS) {
