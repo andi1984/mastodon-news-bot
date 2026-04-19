@@ -1,6 +1,7 @@
 import rssFeedItem2Toot, { FeedItem } from "./rssFeedItem2Toot.js";
 import { ClusterArticle, isBreakingNews, pickPrimaryArticle } from "./similarity.js";
 import { getTopicEmoji } from "./engagementEnhancer.js";
+import { normalizeUrl } from "./normalizeUrl.js";
 
 const MASTODON_CHAR_LIMIT = 500;
 
@@ -115,38 +116,44 @@ export function formatThreadReply(
   const primary = pickPrimaryArticle(articles, feedPriorities);
   const title = primary.article.title || "";
   const link = primary.article.link || "";
+  const normalizedLink = normalizeUrl(link);
   const feedName = primary.feedKey || "unbekannt";
 
   const sourceCount = new Set(articles.map((a) => a.feedKey)).size;
   const prefix =
     sourceCount > 1 ? `Update (${sourceCount} Quellen): ` : "Update: ";
 
-  // Track links to exclude (from original toot) and links we've already added
-  const excludedLinksSet = new Set<string>(excludeLinks);
+  // Compare links in canonical form. Raw string equality lets cosmetic
+  // variants (trailing slash, utm params, fragment, host case) slip past
+  // the excludeLinks check, which is how the same verbraucherzentrale
+  // URL kept getting re-posted daily as a "new" follow-up. Display
+  // strings still use the original feed-supplied URL.
+  const excludedLinksSet = new Set<string>(
+    excludeLinks.map((l) => normalizeUrl(l)).filter((l) => l)
+  );
   const seenLinks = new Set<string>();
 
-  // Start building the toot - only add primary link if not in excluded set
   let toot: string;
-  if (excludedLinksSet.has(link)) {
-    // Primary link is already in quoted toot - use title only with source name
+  if (normalizedLink && excludedLinksSet.has(normalizedLink)) {
     toot = `${prefix}${title}\n\n(${feedName})`;
   } else {
     toot = `${prefix}${title}\n\n${feedName}: ${link}`;
-    seenLinks.add(link);
+    if (normalizedLink) seenLinks.add(normalizedLink);
   }
 
-  // Add other sources if multiple, deduplicating by link and excluding original toot links
   if (sourceCount > 1) {
     const otherSources = articles
       .filter((a) => a.id !== primary.id && a.feedKey !== primary.feedKey)
       .filter((a) => {
-        const l = a.article.link || "";
-        // Skip if already seen or in excluded links
-        if (seenLinks.has(l) || excludedLinksSet.has(l)) return false;
-        seenLinks.add(l);
+        const normalized = normalizeUrl(a.article.link);
+        if (!normalized) return false;
+        if (seenLinks.has(normalized) || excludedLinksSet.has(normalized)) {
+          return false;
+        }
+        seenLinks.add(normalized);
         return true;
       })
-      .slice(0, 2); // Limit to 2 additional sources
+      .slice(0, 2);
     for (const src of otherSources) {
       const srcLine = `\n${src.feedKey || "unbekannt"}: ${src.article.link || ""}`;
       if (toot.length + srcLine.length <= 500) {

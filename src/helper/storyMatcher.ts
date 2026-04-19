@@ -4,6 +4,7 @@ import {
   batchSemanticSimilarity,
   SemanticPair,
 } from "./semanticSimilarity.js";
+import { normalizeUrl } from "./normalizeUrl.js";
 
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
@@ -321,7 +322,9 @@ export async function processNewArticles(
 
 /**
  * Mark a story as tooted and store the toot ID and original links.
- * Original links are stored to prevent duplicate links in quote replies.
+ * Original links are stored in normalized form so cosmetic URL variants
+ * (trailing slash, utm params, fragment) don't defeat the follow-up
+ * dedup on the next tooter tick.
  */
 export async function markStoryTooted(
   storyId: string,
@@ -330,12 +333,20 @@ export async function markStoryTooted(
 ): Promise<void> {
   const db = createClient();
 
+  const normalized = Array.from(
+    new Set(
+      originalLinks
+        .map((l) => normalizeUrl(l))
+        .filter((l): l is string => !!l)
+    )
+  );
+
   const { error } = await db
     .from("stories")
     .update({
       tooted: true,
       toot_id: tootId,
-      original_links: originalLinks,
+      original_links: normalized,
     })
     .eq("id", storyId);
 
