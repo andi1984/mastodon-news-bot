@@ -5,6 +5,7 @@ import {
   SemanticPair,
 } from "./semanticSimilarity.js";
 import { normalizeUrl } from "./normalizeUrl.js";
+import { findStoryByUrl } from "./findStoryByUrl.js";
 
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
@@ -28,6 +29,7 @@ export interface ArticleForMatching {
   contentSnippet?: string;
   pubDate: string;
   feedKey?: string;
+  link?: string;
 }
 
 // Configurable thresholds from settings
@@ -51,6 +53,21 @@ export async function findMatchingStory(
   dbTable: string
 ): Promise<StoryRecord | null> {
   const db = createClient();
+
+  // URL-based short-circuit: if this article's link is already in some
+  // story's original_links, that's the matching story - regardless of
+  // the story's age or the article's tokens. Catches re-ingested feed
+  // items whose hash drifted cosmetically and whose story is >72h old
+  // (outside the token-match window below).
+  if (article.link) {
+    const byUrl = await findStoryByUrl(db, article.link);
+    if (byUrl) {
+      console.log(
+        `Article "${article.title.slice(0, 50)}..." matches story "${byUrl.primary_title.slice(0, 50)}..." (url match)`
+      );
+      return byUrl;
+    }
+  }
 
   const cutoff = new Date();
   cutoff.setHours(cutoff.getHours() - STORY_MAX_AGE_HOURS);

@@ -179,6 +179,7 @@ async function fetchFeedBatch(
         contentSnippet: row.data.contentSnippet,
         pubDate: row.pub_date,
         feedKey: row.data._feedKey,
+        link: row.data.link,
       })
     );
     await processNewArticles(articlesForMatching, settings.db_table);
