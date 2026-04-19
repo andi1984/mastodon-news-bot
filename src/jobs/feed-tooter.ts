@@ -24,6 +24,8 @@ import {
   recordPinnedToot,
 } from "../helper/botState.js";
 import { saveHashesAndFinalize } from "../helper/hashPersistence.js";
+import { normalizeUrl } from "../helper/normalizeUrl.js";
+import { extendStoryOriginalLinks } from "../helper/storyLinks.js";
 
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
@@ -465,10 +467,15 @@ type StoryInfo = {
         score: scoreFeedItem(row.data._feedKey, row.pub_date, FEED_PRIORITIES, MIN_FRESHNESS_HOURS),
       }));
 
-      // Check if any articles have new links (not in original toot)
-      const originalLinksSet = new Set(storyInfo.original_links || []);
+      // Compare in normalized form on BOTH sides. Legacy stories written
+      // before normalization shipped may have raw URLs in original_links;
+      // normalizing on read lets the dedup catch them too.
+      const normalizedOriginalLinks = (storyInfo.original_links || [])
+        .map((l) => normalizeUrl(l))
+        .filter((l): l is string => !!l);
+      const originalLinksSet = new Set(normalizedOriginalLinks);
       const newLinks = articles
-        .map((a) => a.article.link)
+        .map((a) => normalizeUrl(a.article.link))
         .filter((link): link is string => !!link && !originalLinksSet.has(link));
 
       if (newLinks.length === 0) {
@@ -484,7 +491,7 @@ type StoryInfo = {
       const replyText = formatThreadReply(
         articles,
         FEED_PRIORITIES,
-        storyInfo.original_links || []
+        normalizedOriginalLinks
       );
 
       // Use quotedStatusId instead of inReplyToId for better visibility
@@ -495,6 +502,16 @@ type StoryInfo = {
         visibility: "public",
         language: "de",
       });
+
+      // Append the just-posted links to the story's original_links so the
+      // next tooter tick treats them as already-seen. Without this, the
+      // same URL can be re-ingested (new hash from a cosmetic title change)
+      // and re-posted as a "new" follow-up tomorrow.
+      await extendStoryOriginalLinks(
+        db,
+        storyId,
+        articles.map((a) => a.article.link || "")
+      );
 
       const articleIds = articles.map((a) => a.id);
       await saveHashesAndFinalize(db, articleIds, "thread-reply");

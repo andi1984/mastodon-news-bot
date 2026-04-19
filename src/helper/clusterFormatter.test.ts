@@ -299,4 +299,94 @@ describe("formatThreadReply", () => {
     const linkMatches = result.match(/https:\/\/shared\.com\/link/g);
     expect(linkMatches?.length).toBe(1);
   });
+
+  // ---- Regression tests for the daily re-toot bug ----
+  //
+  // Background: the `verbraucherzentrale` feed re-emits the same article
+  // for weeks, sometimes with a cosmetic URL tweak (trailing slash,
+  // tracking param, fragment). `formatThreadReply` was comparing links
+  // with raw string equality, so the variant was treated as "new" and
+  // included in the quote post even though the primary toot already
+  // linked the same page. These tests pin that behavior shut.
+
+  it("treats trailing-slash URL as duplicate of no-slash URL in excludeLinks", () => {
+    const originalLinks = [
+      "https://www.verbraucherzentrale-saarland.de/verfahren/stadtsparkasse-muenchen",
+    ];
+    const articles = [
+      makeArticle({
+        id: "1",
+        title: "Klage gegen Stadtsparkasse München",
+        link: "https://www.verbraucherzentrale-saarland.de/verfahren/stadtsparkasse-muenchen/",
+        feedKey: "verbraucherzentrale",
+      }),
+    ];
+    const result = formatThreadReply(articles, feedPriorities, originalLinks);
+    // The URL must not appear at all - it's the same page as the original.
+    expect(result).not.toMatch(/stadtsparkasse-muenchen/);
+  });
+
+  it("treats utm-param URL as duplicate of clean URL in excludeLinks", () => {
+    const originalLinks = ["https://example.com/article"];
+    const articles = [
+      makeArticle({
+        id: "1",
+        title: "Same article",
+        link: "https://example.com/article?utm_source=rss&utm_medium=feed",
+        feedKey: "feed-a",
+      }),
+    ];
+    const result = formatThreadReply(articles, feedPriorities, originalLinks);
+    expect(result).not.toMatch(/example\.com\/article/);
+  });
+
+  it("treats fragment-only URL variation as duplicate in excludeLinks", () => {
+    const originalLinks = ["https://example.com/article"];
+    const articles = [
+      makeArticle({
+        id: "1",
+        title: "Same article",
+        link: "https://example.com/article#read-more",
+        feedKey: "feed-a",
+      }),
+    ];
+    const result = formatThreadReply(articles, feedPriorities, originalLinks);
+    expect(result).not.toMatch(/example\.com\/article/);
+  });
+
+  it("treats mixed-case-host URL as duplicate of lowercase URL in excludeLinks", () => {
+    const originalLinks = ["https://example.com/article"];
+    const articles = [
+      makeArticle({
+        id: "1",
+        title: "Same article",
+        link: "HTTPS://Example.COM/article",
+        feedKey: "feed-a",
+      }),
+    ];
+    const result = formatThreadReply(articles, feedPriorities, originalLinks);
+    expect(result).not.toMatch(/[Ee]xample\.[Cc][Oo][Mm]\/article/);
+  });
+
+  it("deduplicates cosmetic URL variants across multiple follow-up articles", () => {
+    // Multi-source cluster where two feeds emit the same page via
+    // slightly different URLs - the second copy must be filtered.
+    const articles = [
+      makeArticle({
+        id: "1",
+        title: "Article",
+        link: "https://shared.com/page",
+        feedKey: "feed-a",
+      }),
+      makeArticle({
+        id: "2",
+        title: "Article (other feed)",
+        link: "https://shared.com/page/?utm_source=twitter",
+        feedKey: "feed-b",
+      }),
+    ];
+    const result = formatThreadReply(articles, feedPriorities);
+    const linkMatches = result.match(/shared\.com\/page/g);
+    expect(linkMatches?.length).toBe(1);
+  });
 });
