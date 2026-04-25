@@ -102,6 +102,7 @@
   "breaking_news_time_window_hours": 3,
   "breaking_news_priority_boost": 2,
   "story_similarity_threshold": 0.40,
+  "story_follow_up_threshold": 0.55,
   "story_max_age_hours": 72,
   "story_threading_enabled": true,
   "story_retention_days": 3,

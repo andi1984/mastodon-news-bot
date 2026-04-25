@@ -41,8 +41,19 @@ const MAX_STORY_TOKENS = 150; // Prevent unbounded token array growth
 // AI matching thresholds - only use AI when token score is uncertain
 // Raised thresholds to prevent false positives from regional token overlap
 const AI_UNCERTAIN_LOW = 0.20; // Below this: definitely different stories
-const AI_UNCERTAIN_HIGH = STORY_SIMILARITY_THRESHOLD; // Above this: definitely same story
+const AI_UNCERTAIN_HIGH = STORY_SIMILARITY_THRESHOLD; // Above this: definitely same story (untooted)
 const SEMANTIC_MATCH_THRESHOLD = 0.8; // Semantic score needed to consider a match (stricter)
+
+// Tooted stories need a higher token bar before accepting a follow-up assignment.
+// A borderline Jaccard match (e.g. two police reports from the same district sharing
+// boilerplate vocabulary) is acceptable for grouping unposted articles together, but
+// not for threading a new article under an already-published toot - that creates a
+// visibly wrong "Update" quote on an unrelated post.
+// Borderline cases (STORY_SIMILARITY_THRESHOLD..STORY_FOLLOW_UP_THRESHOLD) are still
+// forwarded to the AI semantic check so genuine follow-ups aren't silently dropped.
+const STORY_FOLLOW_UP_THRESHOLD =
+  (settings as any).story_follow_up_threshold ??
+  STORY_SIMILARITY_THRESHOLD + 0.15;
 
 /**
  * Find an existing story that matches the given article, or return null.
@@ -103,7 +114,14 @@ export async function findMatchingStory(
     const storyTokens = new Set(story.tokens || []);
     const similarity = jaccardSimilarity(articleTokens, storyTokens);
 
-    if (similarity >= STORY_SIMILARITY_THRESHOLD) {
+    // Already-tooted stories require a higher token score for a direct match.
+    // The gap between STORY_SIMILARITY_THRESHOLD and STORY_FOLLOW_UP_THRESHOLD
+    // is sent to the AI uncertain zone so genuine follow-ups still get through.
+    const definiteThreshold = story.tooted
+      ? STORY_FOLLOW_UP_THRESHOLD
+      : STORY_SIMILARITY_THRESHOLD;
+
+    if (similarity >= definiteThreshold) {
       // Definite match based on tokens
       if (similarity > bestScore) {
         bestScore = similarity;
