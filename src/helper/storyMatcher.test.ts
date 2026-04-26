@@ -201,6 +201,58 @@ describe("storyMatcher core logic", () => {
   });
 });
 
+// Tests for the two-threshold behavior that prevents false-positive follow-up quotes.
+// An already-tooted story requires STORY_FOLLOW_UP_THRESHOLD (0.55) for a direct token
+// match; untooted stories still use STORY_SIMILARITY_THRESHOLD (0.40).
+describe("follow-up threshold: tooted vs untooted stories", () => {
+  const BASE_THRESHOLD = 0.40;
+  const FOLLOW_UP_THRESHOLD = 0.55;
+
+  function scoreForStory(
+    storyTitle: string,
+    articleTitle: string,
+    storyContent?: string,
+    articleContent?: string
+  ): number {
+    const storyText = storyContent
+      ? `${storyTitle} ${storyContent.slice(0, 500)}`
+      : storyTitle;
+    const articleText = articleContent
+      ? `${articleTitle} ${articleContent.slice(0, 500)}`
+      : articleTitle;
+    return jaccardSimilarity(tokenize(storyText), tokenize(articleText));
+  }
+
+  it("borderline score (0.40-0.55) matches untooted story but NOT tooted story", () => {
+    // Two police reports from the same district share boilerplate vocabulary.
+    // They are about different incidents ("Einbruch" vs "Diebstahl") so we
+    // don't want the second to become a follow-up quote on the first.
+    const score = scoreForStory(
+      "Polizeipräsidium Saarbrücken: Einbruch in Apotheke - Polizei sucht Zeugen",
+      "Polizeipräsidium Saarbrücken: Diebstahl gemeldet - Polizei bittet Zeugen",
+      "Die Polizei Saarbrücken berichtet über einen Einbruch. Zeugen werden gebeten sich zu melden.",
+      "Die Polizei Saarbrücken berichtet über einen Diebstahl. Zeugen werden gebeten sich zu melden."
+    );
+
+    // Must be in the borderline zone: passes BASE_THRESHOLD but not FOLLOW_UP_THRESHOLD
+    expect(score).toBeGreaterThanOrEqual(BASE_THRESHOLD);
+    expect(score).toBeLessThan(FOLLOW_UP_THRESHOLD);
+  });
+
+  it("high-overlap follow-up clears FOLLOW_UP_THRESHOLD for tooted story", () => {
+    // A second source reporting the same incident with nearly identical vocabulary
+    // (same location, same event type, same key facts) should score above 0.55.
+    const score = scoreForStory(
+      "Einbruch Saarbrücken Innenstadt Polizei Zeugen Schmuck gestohlen Täter flüchtig Ermittlungen",
+      "Saarbrücken Innenstadt Einbruch Schmuck gestohlen Polizei Zeugen Ermittlungen Täter",
+      "Polizei Saarbrücken Einbruch Innenstadt Schmuck Täter flüchtig Zeugen Ermittlungen",
+      "Einbruch Saarbrücken Innenstadt Polizei Schmuck gestohlen Täter Zeugen Ermittlungen"
+    );
+
+    expect(score).toBeGreaterThanOrEqual(FOLLOW_UP_THRESHOLD);
+  });
+});
+
 describe("cross-feed batch matching", () => {
   it("groups articles from different feeds about same topic", () => {
     const articles = [
