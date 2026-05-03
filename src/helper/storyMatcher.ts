@@ -6,6 +6,11 @@ import {
 } from "./semanticSimilarity.js";
 import { normalizeUrl } from "./normalizeUrl.js";
 import { findStoryByUrl } from "./findStoryByUrl.js";
+import {
+  chooseStoryMatch,
+  type StoryCandidate,
+  type SemanticChecker,
+} from "./chooseStoryMatch.js";
 
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
@@ -104,82 +109,61 @@ export async function findMatchingStory(
     : article.title;
   const articleTokens = tokenize(articleText);
 
-  let bestMatch: StoryRecord | null = null;
-  let bestScore = 0;
+  const candidates: StoryCandidate[] = (stories as StoryRecord[]).map(
+    (story) => ({
+      story,
+      jaccardScore: jaccardSimilarity(
+        articleTokens,
+        new Set(story.tokens || [])
+      ),
+    })
+  );
 
-  // Candidates for AI check (uncertain zone)
-  const uncertainCandidates: { story: StoryRecord; score: number }[] = [];
+  const result = await chooseStoryMatch(
+    article.title,
+    candidates,
+    {
+      baseThreshold: STORY_SIMILARITY_THRESHOLD,
+      followUpThreshold: STORY_FOLLOW_UP_THRESHOLD,
+      uncertainLow: AI_UNCERTAIN_LOW,
+      semanticMatchThreshold: SEMANTIC_MATCH_THRESHOLD,
+    },
+    semanticCheckAdapter
+  );
 
-  for (const story of stories as StoryRecord[]) {
-    const storyTokens = new Set(story.tokens || []);
-    const similarity = jaccardSimilarity(articleTokens, storyTokens);
+  if (!result) return null;
 
-    // Already-tooted stories require a higher token score for a direct match.
-    // The gap between STORY_SIMILARITY_THRESHOLD and STORY_FOLLOW_UP_THRESHOLD
-    // is sent to the AI uncertain zone so genuine follow-ups still get through.
-    const definiteThreshold = story.tooted
-      ? STORY_FOLLOW_UP_THRESHOLD
-      : STORY_SIMILARITY_THRESHOLD;
-
-    if (similarity >= definiteThreshold) {
-      // Definite match based on tokens
-      if (similarity > bestScore) {
-        bestScore = similarity;
-        bestMatch = story;
-      }
-    } else if (similarity >= AI_UNCERTAIN_LOW) {
-      // Uncertain zone - candidate for AI check
-      uncertainCandidates.push({ story, score: similarity });
-    }
-  }
-
-  // If we have a definite match, return it
-  if (bestMatch) {
+  if (result.reason === "token") {
     console.log(
-      `Article "${article.title.slice(0, 50)}..." matches story "${bestMatch.primary_title.slice(0, 50)}..." (token score=${bestScore.toFixed(3)})`
+      `Article "${article.title.slice(0, 50)}..." matches story "${result.story.primary_title.slice(0, 50)}..." (token score=${result.score.toFixed(3)})`
     );
-    return bestMatch;
+  } else {
+    console.log(
+      `Article "${article.title.slice(0, 50)}..." matches story "${result.story.primary_title.slice(0, 50)}..." (semantic=${result.score.toFixed(2)})`
+    );
   }
-
-  // Check uncertain candidates with batch semantic similarity (top 3 by score).
-  // Cap kept low to limit AI spend; the Jaccard pre-filter already catches
-  // most true matches, and low-ranking uncertain candidates are rarely right.
-  if (uncertainCandidates.length > 0) {
-    uncertainCandidates.sort((a, b) => b.score - a.score);
-    const toCheck = uncertainCandidates.slice(0, 3);
-
-    // Build batch request
-    const pairs: SemanticPair[] = toCheck.map((candidate, idx) => ({
-      indexA: idx,
-      indexB: idx, // We use indexA to track which candidate
-      titleA: article.title,
-      titleB: candidate.story.primary_title,
-    }));
-
-    const semanticResults = await batchSemanticSimilarity(pairs);
-
-    // Find best semantic match above threshold
-    let bestSemanticMatch: StoryRecord | null = null;
-    let bestSemanticScore = 0;
-
-    for (const result of semanticResults) {
-      if (result.score >= SEMANTIC_MATCH_THRESHOLD && result.score > bestSemanticScore) {
-        bestSemanticScore = result.score;
-        bestSemanticMatch = toCheck[result.indexA].story;
-      }
-    }
-
-    if (bestSemanticMatch) {
-      const tokenScore = toCheck.find(c => c.story.id === bestSemanticMatch!.id)?.score ?? 0;
-      console.log(
-        `Article "${article.title.slice(0, 50)}..." matches story "${bestSemanticMatch.primary_title.slice(0, 50)}..." (semantic=${bestSemanticScore.toFixed(2)}, token=${tokenScore.toFixed(3)})`
-      );
-      return bestSemanticMatch;
-    }
-  }
-
-  return null;
+  return result.story;
 }
+
+// Adapter wiring chooseStoryMatch's semantic-check callback to the existing
+// batchSemanticSimilarity client. Keeping the wiring out of the pure decision
+// function lets us unit-test chooseStoryMatch without mocking the AI client.
+const semanticCheckAdapter: SemanticChecker = async (pairs) => {
+  if (pairs.length === 0) return new Map();
+  const semanticPairs: SemanticPair[] = pairs.map((p, idx) => ({
+    indexA: idx,
+    indexB: idx,
+    titleA: p.titleA,
+    titleB: p.titleB,
+  }));
+  const results = await batchSemanticSimilarity(semanticPairs);
+  const out = new Map<string, number>();
+  for (const r of results) {
+    const matched = pairs[r.indexA];
+    if (matched) out.set(matched.story.id, r.score);
+  }
+  return out;
+};
 
 /**
  * Create a new story from an article.
