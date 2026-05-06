@@ -23,7 +23,11 @@ import {
   recordLastToot,
   recordPinnedToot,
 } from "../helper/botState.js";
-import { saveHashesAndFinalize } from "../helper/hashPersistence.js";
+import {
+  saveHashesAndFinalize,
+  claimArticles,
+  releaseCanonicalUrls,
+} from "../helper/hashPersistence.js";
 import { normalizeUrl } from "../helper/normalizeUrl.js";
 import { extendStoryOriginalLinks } from "../helper/storyLinks.js";
 
@@ -316,9 +320,58 @@ type StoryInfo = {
   // 8. Post new stories
   let pollPostedThisRun = false; // Limit to one poll per run
 
+  // In-batch URL guard: every canonical URL we successfully post in THIS
+  // run lands here. The next story in the batch that references the same
+  // URL is dropped before its Mastodon API call. Combined with the DB-
+  // level pre-claim (claimArticles), this closes both the in-batch and
+  // cross-process duplicate-post windows.
+  const postedCanonicalUrls = new Set<string>();
+
   for (const story of batch) {
     try {
       const primary = pickPrimaryArticle(story.articles, FEED_PRIORITIES);
+      const articleIds = story.articles.map((a) => a.id);
+
+      const storyCanonicalUrls = Array.from(
+        new Set(
+          story.articles
+            .map((a) => normalizeUrl(a.article.link))
+            .filter((u) => !!u)
+        )
+      );
+
+      const inBatchDup = storyCanonicalUrls.find((u) =>
+        postedCanonicalUrls.has(u)
+      );
+      if (inBatchDup) {
+        console.warn(
+          `Skipping story (in-batch URL dup): "${inBatchDup}" already posted this run; cleaning up ${articleIds.length} article(s)`
+        );
+        await saveHashesAndFinalize(db, articleIds, "in-batch-dup");
+        continue;
+      }
+
+      const claim = await claimArticles(db, articleIds, "main-toot-claim");
+      if (claim.conflictArticleIds.length > 0) {
+        console.warn(
+          `Skipping story (cross-run URL claim conflict on ${claim.conflictArticleIds.length}/${articleIds.length} article(s)); URL already in tooted_hashes`
+        );
+        await saveHashesAndFinalize(
+          db,
+          claim.conflictArticleIds,
+          "claim-conflict"
+        );
+        // Release any partial claims we did make before bailing — without
+        // posting, those URLs would otherwise be permanently blocked.
+        if (claim.claimedCanonicalUrls.length > 0) {
+          await releaseCanonicalUrls(
+            db,
+            claim.claimedCanonicalUrls,
+            "claim-conflict-rollback"
+          );
+        }
+        continue;
+      }
 
       // Generate content-derived hashtags from primary article
       const hashtags = await generateHashtags(
@@ -388,17 +441,35 @@ type StoryInfo = {
         language: "de",
       };
 
-      const tootResult = mediaIds
-        ? await mastoClient.v1.statuses.create({ ...baseParams, mediaIds })
-        : pollConfig
-          ? await mastoClient.v1.statuses.create({
-              ...baseParams,
-              poll: {
-                options: pollConfig.options,
-                expiresIn: pollConfig.expiresInSeconds,
-              },
-            })
-          : await mastoClient.v1.statuses.create(baseParams);
+      let tootResult;
+      try {
+        tootResult = mediaIds
+          ? await mastoClient.v1.statuses.create({ ...baseParams, mediaIds })
+          : pollConfig
+            ? await mastoClient.v1.statuses.create({
+                ...baseParams,
+                poll: {
+                  options: pollConfig.options,
+                  expiresIn: pollConfig.expiresInSeconds,
+                },
+              })
+            : await mastoClient.v1.statuses.create(baseParams);
+      } catch (postErr) {
+        // Mastodon API failed AFTER we pre-claimed the URLs — roll back
+        // the claim so a future run can retry; otherwise a transient
+        // network blip would permanently block re-posting.
+        if (claim.claimedCanonicalUrls.length > 0) {
+          await releaseCanonicalUrls(
+            db,
+            claim.claimedCanonicalUrls,
+            "main-toot-rollback"
+          );
+        }
+        throw postErr;
+      }
+
+      // Post succeeded: lock these URLs against the rest of this run.
+      for (const u of storyCanonicalUrls) postedCanonicalUrls.add(u);
 
       if (pollConfig) {
         pollPostedThisRun = true;
@@ -427,7 +498,6 @@ type StoryInfo = {
         await markStoryTooted(story.storyId, tootResult.id, originalLinks);
       }
 
-      const articleIds = story.articles.map((a) => a.id);
       await saveHashesAndFinalize(db, articleIds, "main-toot");
 
       const sourceCount = new Set(story.articles.map((a) => a.feedKey)).size;
@@ -467,57 +537,108 @@ type StoryInfo = {
         score: scoreFeedItem(row.data._feedKey, row.pub_date, FEED_PRIORITIES, MIN_FRESHNESS_HOURS),
       }));
 
-      // Compare in normalized form on BOTH sides. Legacy stories written
-      // before normalization shipped may have raw URLs in original_links;
-      // normalizing on read lets the dedup catch them too.
+      // Build the exclusion set in normalized form on BOTH sides. Legacy
+      // stories written before normalization shipped may have raw URLs in
+      // original_links; normalizing on read lets the dedup catch them too.
       const normalizedOriginalLinks = (storyInfo.original_links || [])
         .map((l) => normalizeUrl(l))
         .filter((l): l is string => !!l);
       const originalLinksSet = new Set(normalizedOriginalLinks);
-      const newLinks = articles
-        .map((a) => normalizeUrl(a.article.link))
-        .filter((link): link is string => !!link && !originalLinksSet.has(link));
 
-      if (newLinks.length === 0) {
-        // All links are duplicates - no value in posting a quote
-        const articleIds = articles.map((a) => a.id);
-        await saveHashesAndFinalize(db, articleIds, "thread-skip-duplicate");
+      const usableArticles: ClusterArticle[] = [];
+      const duplicateIds: string[] = [];
+      for (const a of articles) {
+        const normalized = normalizeUrl(a.article.link);
+        const rawLink = a.article.link || "";
+        const isDup =
+          (normalized && originalLinksSet.has(normalized)) ||
+          (normalized && postedCanonicalUrls.has(normalized)) ||
+          (!normalized && rawLink && (storyInfo.original_links || []).includes(rawLink));
+        if (isDup) {
+          duplicateIds.push(a.id);
+        } else {
+          usableArticles.push(a);
+        }
+      }
+
+      if (duplicateIds.length > 0) {
+        await saveHashesAndFinalize(db, duplicateIds, "thread-skip-duplicate");
         console.log(
-          `Skipped thread reply: ${articleIds.length} articles with duplicate links for story ${storyId.slice(0, 8)}...`
+          `Thread for story ${storyId.slice(0, 8)}: dropped ${duplicateIds.length} duplicate article(s)`
         );
+      }
+
+      if (usableArticles.length === 0) {
+        continue;
+      }
+
+      const usableIds = usableArticles.map((a) => a.id);
+
+      const claim = await claimArticles(db, usableIds, "thread-claim");
+      if (claim.conflictArticleIds.length > 0) {
+        console.warn(
+          `Thread for story ${storyId.slice(0, 8)}: cross-run URL conflict on ${claim.conflictArticleIds.length}/${usableIds.length} article(s); skipping`
+        );
+        await saveHashesAndFinalize(
+          db,
+          claim.conflictArticleIds,
+          "thread-claim-conflict"
+        );
+        if (claim.claimedCanonicalUrls.length > 0) {
+          await releaseCanonicalUrls(
+            db,
+            claim.claimedCanonicalUrls,
+            "thread-claim-conflict-rollback"
+          );
+        }
         continue;
       }
 
       const replyText = formatThreadReply(
-        articles,
+        usableArticles,
         FEED_PRIORITIES,
-        normalizedOriginalLinks
+        storyInfo.original_links || []
       );
 
       // Use quotedStatusId instead of inReplyToId for better visibility
       // Quote posts appear prominently and increase engagement with the original
-      await mastoClient.v1.statuses.create({
-        status: replyText,
-        quotedStatusId: storyInfo.toot_id,
-        visibility: "public",
-        language: "de",
-      });
+      try {
+        await mastoClient.v1.statuses.create({
+          status: replyText,
+          quotedStatusId: storyInfo.toot_id,
+          visibility: "public",
+          language: "de",
+        });
+      } catch (postErr) {
+        if (claim.claimedCanonicalUrls.length > 0) {
+          await releaseCanonicalUrls(
+            db,
+            claim.claimedCanonicalUrls,
+            "thread-toot-rollback"
+          );
+        }
+        throw postErr;
+      }
+
+      // Lock these URLs against the rest of this run.
+      for (const a of usableArticles) {
+        const n = normalizeUrl(a.article.link);
+        if (n) postedCanonicalUrls.add(n);
+      }
 
       // Append the just-posted links to the story's original_links so the
-      // next tooter tick treats them as already-seen. Without this, the
-      // same URL can be re-ingested (new hash from a cosmetic title change)
-      // and re-posted as a "new" follow-up tomorrow.
+      // next tooter tick treats them as already-seen even if they're
+      // re-ingested with a fresh hash (e.g. cosmetic title change).
       await extendStoryOriginalLinks(
         db,
         storyId,
         articles.map((a) => a.article.link || "")
       );
 
-      const articleIds = articles.map((a) => a.id);
-      await saveHashesAndFinalize(db, articleIds, "thread-reply");
+      await saveHashesAndFinalize(db, usableIds, "thread-reply");
 
       console.log(
-        `Threaded reply: ${articleIds.length} articles to story ${storyId.slice(0, 8)}...`
+        `Threaded reply: ${usableIds.length} articles to story ${storyId.slice(0, 8)}...`
       );
 
       threadCount++;

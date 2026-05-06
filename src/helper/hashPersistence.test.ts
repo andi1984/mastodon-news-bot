@@ -88,7 +88,10 @@ describe("saveHashesAndFinalize", () => {
 
   test("happy path: selects hashes, upserts them, deletes articles, no update", async () => {
     selectResult = {
-      data: [{ hash: "h1" }, { hash: "h2" }],
+      data: [
+        { hash: "h1", canonical_url: "https://sr.de/a" },
+        { hash: "h2", canonical_url: null },
+      ],
       error: null,
     };
 
@@ -97,7 +100,7 @@ describe("saveHashesAndFinalize", () => {
     const selectCall = calls.find((c) => c.op === "select");
     expect(selectCall).toBeDefined();
     expect(selectCall!.table).toBe("news");
-    expect(selectCall!.args).toEqual(["hash"]);
+    expect(selectCall!.args).toEqual(["hash, canonical_url"]);
     expect(selectCall!.filter).toEqual({
       method: "in",
       col: "id",
@@ -107,7 +110,10 @@ describe("saveHashesAndFinalize", () => {
     const upsertCall = calls.find((c) => c.op === "upsert");
     expect(upsertCall).toBeDefined();
     expect(upsertCall!.table).toBe("tooted_hashes");
-    expect(upsertCall!.args[0]).toEqual([{ hash: "h1" }, { hash: "h2" }]);
+    expect(upsertCall!.args[0]).toEqual([
+      { hash: "h1", canonical_url: "https://sr.de/a" },
+      { hash: "h2", canonical_url: null },
+    ]);
     expect(upsertCall!.upsertOptions).toEqual({ onConflict: "hash" });
 
     const deleteCall = calls.find((c) => c.op === "delete");
@@ -161,10 +167,10 @@ describe("saveHashesAndFinalize", () => {
   test("filters null/empty hashes, upserts only non-null ones", async () => {
     selectResult = {
       data: [
-        { hash: "keep1" },
-        { hash: null },
-        { hash: "" },
-        { hash: "keep2" },
+        { hash: "keep1", canonical_url: null },
+        { hash: null, canonical_url: null },
+        { hash: "", canonical_url: null },
+        { hash: "keep2", canonical_url: "https://sr.de/k2" },
       ],
       error: null,
     };
@@ -173,7 +179,10 @@ describe("saveHashesAndFinalize", () => {
 
     const upsertCall = calls.find((c) => c.op === "upsert");
     expect(upsertCall).toBeDefined();
-    expect(upsertCall!.args[0]).toEqual([{ hash: "keep1" }, { hash: "keep2" }]);
+    expect(upsertCall!.args[0]).toEqual([
+      { hash: "keep1", canonical_url: null },
+      { hash: "keep2", canonical_url: "https://sr.de/k2" },
+    ]);
     expect(upsertCall!.upsertOptions).toEqual({ onConflict: "hash" });
 
     // Delete is still called with all articleIds.
@@ -189,7 +198,10 @@ describe("saveHashesAndFinalize", () => {
     // row would let the RSS item be re-ingested and re-tooted. We prefer
     // to mark it tooted=true and surface the anomaly via the log.
     selectResult = {
-      data: [{ hash: null }, { hash: "" }],
+      data: [
+        { hash: null, canonical_url: null },
+        { hash: "", canonical_url: null },
+      ],
       error: null,
     };
 
@@ -236,7 +248,10 @@ describe("saveHashesAndFinalize", () => {
     // If the fallback update itself fails we cannot throw (the toot is
     // already out). At minimum we must log so operators can find the
     // stuck row. The context string must appear in the log.
-    selectResult = { data: [{ hash: "h1" }], error: null };
+    selectResult = {
+      data: [{ hash: "h1", canonical_url: null }],
+      error: null,
+    };
     upsertResult = { error: { message: "upsert boom" } };
     updateResult = { error: { message: "update boom" } };
 
@@ -257,7 +272,7 @@ describe("saveHashesAndFinalize", () => {
 
   test("upsert error: marks tooted=true and skips delete", async () => {
     selectResult = {
-      data: [{ hash: "h1" }],
+      data: [{ hash: "h1", canonical_url: null }],
       error: null,
     };
     upsertResult = { error: { message: "upsert boom" } };
@@ -266,7 +281,7 @@ describe("saveHashesAndFinalize", () => {
 
     const upsertCall = calls.find((c) => c.op === "upsert");
     expect(upsertCall).toBeDefined();
-    expect(upsertCall!.args[0]).toEqual([{ hash: "h1" }]);
+    expect(upsertCall!.args[0]).toEqual([{ hash: "h1", canonical_url: null }]);
 
     const updateCall = calls.find((c) => c.op === "update");
     expect(updateCall).toBeDefined();
@@ -289,7 +304,7 @@ describe("saveHashesAndFinalize", () => {
 
   test("delete error: marks tooted=true AFTER the failed delete", async () => {
     selectResult = {
-      data: [{ hash: "h1" }],
+      data: [{ hash: "h1", canonical_url: null }],
       error: null,
     };
     deleteResult = { error: { message: "delete boom" } };
@@ -325,7 +340,7 @@ describe("saveHashesAndFinalize", () => {
 
   test("single id happy path (suppressed-article site)", async () => {
     selectResult = {
-      data: [{ hash: "onlyhash" }],
+      data: [{ hash: "onlyhash", canonical_url: "https://sr.de/x" }],
       error: null,
     };
 
@@ -335,12 +350,127 @@ describe("saveHashesAndFinalize", () => {
     expect(selectCall!.filter!.values).toEqual(["only-id"]);
 
     const upsertCall = calls.find((c) => c.op === "upsert");
-    expect(upsertCall!.args[0]).toEqual([{ hash: "onlyhash" }]);
+    expect(upsertCall!.args[0]).toEqual([
+      { hash: "onlyhash", canonical_url: "https://sr.de/x" },
+    ]);
     expect(upsertCall!.upsertOptions).toEqual({ onConflict: "hash" });
 
     const deleteCall = calls.find((c) => c.op === "delete");
     expect(deleteCall!.filter!.values).toEqual(["only-id"]);
 
     expect(calls.find((c) => c.op === "update")).toBeUndefined();
+  });
+});
+
+const { claimArticles, releaseCanonicalUrls } = await import(
+  "./hashPersistence.js"
+);
+
+describe("claimArticles", () => {
+  let errorSpy: jest.SpiedFunction<typeof console.error>;
+
+  beforeEach(() => {
+    calls = [];
+    selectResult = { data: [], error: null };
+    upsertResult = { error: null };
+    deleteResult = { error: null };
+    updateResult = { error: null };
+    mockFrom.mockClear();
+    errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  test("returns empty proceed/conflict on empty input", async () => {
+    const result = await claimArticles(db, [], "empty");
+    expect(result).toEqual({
+      proceedArticleIds: [],
+      conflictArticleIds: [],
+      claimedCanonicalUrls: [],
+    });
+    expect(mockFrom).not.toHaveBeenCalled();
+  });
+
+  test("read error treats all as conflict (fail safe — never duplicate-post)", async () => {
+    selectResult = { data: null, error: { message: "select boom" } };
+    const result = await claimArticles(db, ["a", "b"], "ctx-read-err");
+    expect(result.proceedArticleIds).toEqual([]);
+    expect(result.conflictArticleIds).toEqual(["a", "b"]);
+    expect(result.claimedCanonicalUrls).toEqual([]);
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("ctx-read-err")
+    );
+  });
+
+  test("articles with no canonical_url proceed without DB claim (hash-only path)", async () => {
+    // Simulate: news rows were read; some/all have null canonical_url.
+    // We set a multi-step plan: first select returns the news rows (with
+    // null canonical_url for both), so the function should never reach the
+    // tooted_hashes select/upsert.
+    selectResult = {
+      data: [
+        { id: "a", hash: "h1", canonical_url: null },
+        { id: "b", hash: "h2", canonical_url: null },
+      ],
+      error: null,
+    };
+
+    const result = await claimArticles(db, ["a", "b"], "no-urls");
+
+    expect(result.proceedArticleIds).toEqual(["a", "b"]);
+    expect(result.conflictArticleIds).toEqual([]);
+    expect(result.claimedCanonicalUrls).toEqual([]);
+
+    // Only the news SELECT should have happened — no precheck against
+    // tooted_hashes, no upsert.
+    const tootedHashOps = calls.filter((c) => c.table === "tooted_hashes");
+    expect(tootedHashOps).toEqual([]);
+  });
+});
+
+describe("releaseCanonicalUrls", () => {
+  let errorSpy: jest.SpiedFunction<typeof console.error>;
+
+  beforeEach(() => {
+    calls = [];
+    selectResult = { data: [], error: null };
+    upsertResult = { error: null };
+    deleteResult = { error: null };
+    updateResult = { error: null };
+    mockFrom.mockClear();
+    errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  test("no-ops on empty input", async () => {
+    await releaseCanonicalUrls(db, [], "empty");
+    expect(mockFrom).not.toHaveBeenCalled();
+  });
+
+  test("deletes from tooted_hashes by canonical_url", async () => {
+    await releaseCanonicalUrls(
+      db,
+      ["https://sr.de/a", "https://sr.de/b"],
+      "rollback"
+    );
+
+    const deleteCall = calls.find(
+      (c) => c.op === "delete" && c.table === "tooted_hashes"
+    );
+    expect(deleteCall).toBeDefined();
+    expect(deleteCall!.filter).toEqual({
+      method: "in",
+      col: "canonical_url",
+      values: ["https://sr.de/a", "https://sr.de/b"],
+    });
+  });
+
+  test("logs context on delete error (must not throw)", async () => {
+    deleteResult = { error: { message: "delete boom" } };
+    await releaseCanonicalUrls(db, ["https://sr.de/a"], "ctx-del-err");
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("ctx-del-err")
+    );
+    expect(errorSpy.mock.calls[0][0]).toEqual(
+      expect.stringContaining("delete boom")
+    );
   });
 });

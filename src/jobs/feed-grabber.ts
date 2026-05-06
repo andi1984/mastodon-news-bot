@@ -8,6 +8,7 @@ import getFeed from "../helper/getFeed.js";
 import { filterFeedItemsByAge } from "../helper/feedItemFilter.js";
 import createClient from "../helper/db.js";
 import { sha256 } from "../helper/hash.js";
+import { normalizeUrl } from "../helper/normalizeUrl.js";
 import {
   processNewArticles,
   ArticleForMatching,
@@ -24,6 +25,7 @@ const BATCH_SIZE = 8;
 
 type CandidateRow = {
   hash: string;
+  canonical_url: string | null;
   data: any;
   pub_date: string;
 };
@@ -57,6 +59,7 @@ async function fetchFeedCandidates(
 
     return accepted.map(({ item, pubDate }) => ({
       hash: `${tableId}-${sha256(item.title ?? "")}-${sha256(item.link ?? "")}`,
+      canonical_url: normalizeUrl(item.link) || null,
       data: { ...item, _feedKey: feedKey },
       pub_date: pubDate.toISOString(),
     }));
@@ -99,12 +102,22 @@ async function fetchFeedBatch(
 
   console.log(`Collected ${allCandidates.length} candidates from all feeds`);
 
-  // Phase 2: Filter out duplicates (check against news table and tooted_hashes)
+  // Phase 2: Filter out duplicates (check against news + tooted_hashes by
+  // BOTH hash and canonical_url). hash catches exact title+link repeats;
+  // canonical_url catches the same article syndicated across feeds with
+  // different titles or tracking params on the link.
   const candidateHashes = allCandidates.map((c) => c.hash);
+  const candidateCanonicalUrls = Array.from(
+    new Set(
+      allCandidates
+        .map((c) => c.canonical_url)
+        .filter((u): u is string => !!u)
+    )
+  );
 
-  // Batch query in chunks to avoid hitting query limits
   const QUERY_CHUNK_SIZE = 500;
   const existingHashes = new Set<string>();
+  const existingCanonicalUrls = new Set<string>();
 
   for (let i = 0; i < candidateHashes.length; i += QUERY_CHUNK_SIZE) {
     const chunk = candidateHashes.slice(i, i + QUERY_CHUNK_SIZE);
@@ -126,13 +139,49 @@ async function fetchFeedBatch(
     }
   }
 
-  const filteredCandidates = allCandidates.filter((c) => !existingHashes.has(c.hash));
+  for (let i = 0; i < candidateCanonicalUrls.length; i += QUERY_CHUNK_SIZE) {
+    const chunk = candidateCanonicalUrls.slice(i, i + QUERY_CHUNK_SIZE);
 
-  // Dedupe within batch (same hash can appear if RSS feed has duplicates)
+    const [newsResult, tootedResult] = await Promise.all([
+      supabase
+        .from(settings.db_table)
+        .select("canonical_url")
+        .in("canonical_url", chunk),
+      supabase
+        .from("tooted_hashes")
+        .select("canonical_url")
+        .in("canonical_url", chunk),
+    ]);
+
+    if (newsResult.error) {
+      console.error(`canonical_url check error: ${newsResult.error.message}`);
+    }
+
+    for (const row of newsResult.data ?? []) {
+      const v = (row as { canonical_url: string | null }).canonical_url;
+      if (v) existingCanonicalUrls.add(v);
+    }
+    for (const row of tootedResult.data ?? []) {
+      const v = (row as { canonical_url: string | null }).canonical_url;
+      if (v) existingCanonicalUrls.add(v);
+    }
+  }
+
+  const filteredCandidates = allCandidates.filter(
+    (c) =>
+      !existingHashes.has(c.hash) &&
+      !(c.canonical_url && existingCanonicalUrls.has(c.canonical_url))
+  );
+
+  // Dedupe within batch (same hash OR same canonical_url can appear if
+  // multiple feeds carry the same article with slight title differences).
   const seenHashes = new Set<string>();
+  const seenCanonicalUrls = new Set<string>();
   const newCandidates = filteredCandidates.filter((c) => {
     if (seenHashes.has(c.hash)) return false;
+    if (c.canonical_url && seenCanonicalUrls.has(c.canonical_url)) return false;
     seenHashes.add(c.hash);
+    if (c.canonical_url) seenCanonicalUrls.add(c.canonical_url);
     return true;
   });
 

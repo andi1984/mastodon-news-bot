@@ -76,11 +76,18 @@ export function formatClusterToot(
     return { feedName, link: a.article.link || "" };
   });
 
-  // Deduplicate by feedKey (keep first per feed)
+  // Deduplicate by feedKey AND by normalized URL. Two feeds may carry the
+  // exact same article (different feedKey, same URL — common for syndicated
+  // wire copy); without URL dedup the sources block prints the same link
+  // twice with different labels.
   const seenFeeds = new Set<string>();
+  const seenNormalizedUrls = new Set<string>();
   const uniqueSources = sources.filter((s) => {
     if (seenFeeds.has(s.feedName)) return false;
+    const normalized = normalizeUrl(s.link);
+    if (normalized && seenNormalizedUrls.has(normalized)) return false;
     seenFeeds.add(s.feedName);
+    if (normalized) seenNormalizedUrls.add(normalized);
     return true;
   });
 
