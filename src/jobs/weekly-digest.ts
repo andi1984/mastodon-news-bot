@@ -62,14 +62,12 @@ function getSevenDaysAgoBerlin(): string {
     const context = await mastoClient.v1.statuses.$select(status.id).context.fetch();
     const engagement = calculateEngagement(status, context.descendants, me.id);
 
-    if (engagement.totalInteractions > 0) {
-      scored.push({ status, activity: engagement.totalInteractions });
+    scored.push({ status, activity: engagement.totalInteractions });
 
-      if (engagement.ownReplies > 0) {
-        console.log(
-          `[weekly-digest] Status ${status.id}: excluded ${engagement.ownReplies} own replies`
-        );
-      }
+    if (engagement.ownReplies > 0) {
+      console.log(
+        `[weekly-digest] Status ${status.id}: excluded ${engagement.ownReplies} own replies`
+      );
     }
   }
 
@@ -78,7 +76,7 @@ function getSevenDaysAgoBerlin(): string {
   const topScored = scored.slice(0, 5);
 
   if (topScored.length === 0) {
-    console.log("[weekly-digest] No statuses with external interactions, skipping digest.");
+    console.log("[weekly-digest] No statuses to include in digest, skipping.");
     if (parentPort) parentPort.postMessage("done");
     else process.exit(0);
     return;
