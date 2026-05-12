@@ -128,7 +128,7 @@ export function formatThreadReply(
 
   const sourceCount = new Set(articles.map((a) => a.feedKey)).size;
   const prefix =
-    sourceCount > 1 ? `Update (${sourceCount} Quellen): ` : "Update: ";
+    sourceCount > 1 ? `🔗 Update (📍${sourceCount} Quellen): ` : "🔗 Update: ";
 
   // Compare links in canonical form. Raw string equality lets cosmetic
   // variants (trailing slash, utm params, fragment, host case) slip past

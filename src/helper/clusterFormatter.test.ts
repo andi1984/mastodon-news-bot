@@ -195,7 +195,7 @@ describe("formatThreadReply", () => {
       }),
     ];
     const result = formatThreadReply(articles, feedPriorities);
-    expect(result).toContain("Update: Update on breaking story");
+    expect(result).toContain("🔗 Update: Update on breaking story");
     expect(result).toContain("feed-a: https://a.com/update");
   });
 
@@ -215,7 +215,7 @@ describe("formatThreadReply", () => {
       }),
     ];
     const result = formatThreadReply(articles, feedPriorities);
-    expect(result).toContain("Update (2 Quellen):");
+    expect(result).toContain("🔗 Update (📍2 Quellen):");
     expect(result).toContain("feed-a: https://a.com/1");
     expect(result).toContain("feed-b: https://b.com/2");
   });
@@ -236,7 +236,7 @@ describe("formatThreadReply", () => {
     const result = formatThreadReply(articles, feedPriorities, originalLinks);
     // Should NOT include the link since it's already in the quoted toot
     expect(result).not.toContain("https://a.com/original");
-    expect(result).toContain("Update: Same story different angle");
+    expect(result).toContain("🔗 Update: Same story different angle");
     expect(result).toContain("(feed-a)"); // Source name only, no link
   });
 
