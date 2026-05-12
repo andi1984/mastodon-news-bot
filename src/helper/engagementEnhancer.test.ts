@@ -33,6 +33,26 @@ describe("getTopicEmoji", () => {
     expect(getTopicEmoji("BRAND IN VÖLKLINGEN")).toBe("🔥");
     expect(getTopicEmoji("polizei ermittelt")).toBe("🚔");
   });
+
+  describe("soccer emoji false positive regression", () => {
+    it("does not fire for city name alone", () => {
+      expect(getTopicEmoji("Saarbrücken plant neues Stadtentwicklungsprojekt")).toBe("");
+    });
+
+    it("does not fire for generic 'spiel' in political context", () => {
+      expect(getTopicEmoji("Im Spiel der politischen Kräfte gewinnt die CDU")).toBe("");
+    });
+
+    it("does not fire for 'tor' meaning gate/door", () => {
+      expect(getTopicEmoji("Stadttor saniert: Historisches Gemäuer bekommt neuen Anstrich")).toBe("");
+      expect(getTopicEmoji("Historisches Tor zur Altstadt wird saniert")).toBe("");
+    });
+
+    it("still fires for genuine soccer headlines", () => {
+      expect(getTopicEmoji("1. FC Saarbrücken gewinnt Heimspiel gegen Kaiserslautern")).toBe("⚽");
+      expect(getTopicEmoji("Fußball: Bundesliga-Relegation live")).toBe("⚽");
+    });
+  });
 });
 
 describe("analyzeForPoll", () => {
