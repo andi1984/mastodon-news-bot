@@ -7,6 +7,8 @@ const MockedAnthropic = jest.fn(() => ({
 
 const mockHasAiBudgetForSource = jest.fn().mockResolvedValue(true);
 const mockLogAiUsage = jest.fn().mockResolvedValue(undefined);
+const mockGetCachedRegionalCategories = jest.fn();
+const mockSetCachedRegionalCategories = jest.fn().mockResolvedValue(undefined);
 
 jest.unstable_mockModule("@anthropic-ai/sdk", () => ({
   default: MockedAnthropic,
@@ -15,6 +17,11 @@ jest.unstable_mockModule("@anthropic-ai/sdk", () => ({
 jest.unstable_mockModule("./costTracker", () => ({
   hasAiBudgetForSource: mockHasAiBudgetForSource,
   logAiUsage: mockLogAiUsage,
+}));
+
+jest.unstable_mockModule("./aiCache", () => ({
+  getCachedRegionalCategories: mockGetCachedRegionalCategories,
+  setCachedRegionalCategories: mockSetCachedRegionalCategories,
 }));
 
 const { scoreRegionalRelevance } = await import("./regionalRelevance.js");
@@ -53,6 +60,9 @@ describe("scoreRegionalRelevance", () => {
     jest.clearAllMocks();
     process.env = { ...originalEnv, CLAUDE_API_KEY: "test-key" };
     mockHasAiBudgetForSource.mockResolvedValue(true);
+    mockSetCachedRegionalCategories.mockResolvedValue(undefined);
+    // Default: no cache hits
+    mockGetCachedRegionalCategories.mockResolvedValue(new Map());
   });
 
   afterEach(() => {
@@ -170,5 +180,62 @@ describe("scoreRegionalRelevance", () => {
 
     expect(result.get(0)).toBe(1.0);
     expect(mockMessagesCreate).not.toHaveBeenCalled();
+  });
+
+  it("uses cached categories instead of calling the API (lines 71, 77)", async () => {
+    // Two articles: one has a cache hit, one needs classification
+    mockGetCachedRegionalCategories.mockResolvedValue(
+      new Map([["Brand in Saarbrücken", "local"]])
+    );
+    mockApiResponse(JSON.stringify([{ i: 1, c: "national" }]));
+
+    const articles = [
+      { title: "Brand in Saarbrücken", feedKey: "saarbruecker-zeitung" },
+      { title: "Bundestagswahl", feedKey: "tagesschau" },
+    ];
+
+    const result = await scoreRegionalRelevance(articles, defaultConfig);
+
+    // Cache hit returns local multiplier without API call for index 0
+    expect(result.get(0)).toBe(1.5);
+    // Index 1 classified via API
+    expect(result.get(1)).toBe(1.0);
+  });
+
+  it("returns early when all articles resolved from cache (line 82)", async () => {
+    // All articles have cache hits
+    mockGetCachedRegionalCategories.mockResolvedValue(
+      new Map([
+        ["Erste Nachricht", "local"],
+        ["Zweite Nachricht", "regional"],
+      ])
+    );
+
+    const articles = [
+      { title: "Erste Nachricht", feedKey: "saarbruecker-zeitung" },
+      { title: "Zweite Nachricht", feedKey: "saarbruecker-zeitung" },
+    ];
+
+    const result = await scoreRegionalRelevance(articles, defaultConfig);
+
+    expect(result.get(0)).toBe(1.5);
+    expect(result.get(1)).toBe(1.2);
+    // No API call needed since all were cached
+    expect(mockMessagesCreate).not.toHaveBeenCalled();
+  });
+
+  it("fills missing indices with neutral multiplier when AI omits them (line 150)", async () => {
+    // AI response is missing index 1 entirely
+    mockApiResponse(JSON.stringify([{ i: 0, c: "local" }]));
+
+    const articles = [
+      { title: "Artikel A", feedKey: "saarbruecker-zeitung" },
+      { title: "Artikel B", feedKey: "tagesschau" },
+    ];
+
+    const result = await scoreRegionalRelevance(articles, defaultConfig);
+
+    expect(result.get(0)).toBe(1.5); // classified as local
+    expect(result.get(1)).toBe(1.0); // fallback neutral
   });
 });

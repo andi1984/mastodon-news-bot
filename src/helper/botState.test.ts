@@ -162,6 +162,18 @@ describe("botState", () => {
       expect(expired).toEqual([]);
     });
 
+    test("returns empty array when DB returns an error (line 166)", async () => {
+      // Override mockFrom to simulate a DB error on the like query
+      mockFrom.mockImplementationOnce(() => ({
+        select: jest.fn().mockReturnValue({
+          like: jest.fn().mockReturnValue({ data: null, error: { message: "db error" } }),
+        }),
+      }));
+
+      const expired = await getExpiredPins();
+      expect(expired).toEqual([]);
+    });
+
     test("returns expired pins", async () => {
       const oldTime = new Date();
       oldTime.setHours(oldTime.getHours() - 50); // 50h ago, > 48h threshold

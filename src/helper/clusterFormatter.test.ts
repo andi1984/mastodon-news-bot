@@ -390,3 +390,29 @@ describe("formatThreadReply", () => {
     expect(linkMatches?.length).toBe(1);
   });
 });
+
+describe("toCamelCaseHashtag (via formatClusterToot)", () => {
+  const multiCluster = [
+    makeArticle({ title: "Artikel Eins", link: "https://example.com/1", feedKey: "feed-a" }),
+    makeArticle({ title: "Artikel Zwei", link: "https://example.com/2", feedKey: "feed-b" }),
+  ];
+
+  it("converts all-lowercase hashtags to CamelCase in multi-source cluster", () => {
+    const result = formatClusterToot(multiCluster, {
+      ...defaultOptions,
+      hashtags: ["news", "saarland", "lokalnews"],
+    });
+    expect(result).toContain("#News");
+    expect(result).toContain("#Saarland");
+    expect(result).toContain("#Lokalnews");
+  });
+
+  it("preserves hashtags that already contain uppercase in multi-source cluster", () => {
+    const result = formatClusterToot(multiCluster, {
+      ...defaultOptions,
+      hashtags: ["SaarlandNews", "Eilmeldung"],
+    });
+    expect(result).toContain("#SaarlandNews");
+    expect(result).toContain("#Eilmeldung");
+  });
+});

@@ -229,6 +229,24 @@ describe("cleanupTootedArticles", () => {
     expect(calls.find((c) => c.op === "upsert")).toBeUndefined();
     expect(calls.find((c) => c.op === "delete")).toBeUndefined();
   });
+
+  test("delete fails after successful upsert: logs error and returns 0", async () => {
+    selectResults["news:select"] = {
+      data: [{ id: "a1", hash: "h1" }],
+      error: null,
+    };
+    deleteResult = { error: { message: "delete kaput" } };
+
+    const count = await cleanupTootedArticles(fakeClient);
+    expect(count).toBe(0);
+
+    // Both upsert and delete were called
+    expect(calls.find((c) => c.op === "upsert")).toBeDefined();
+    expect(calls.find((c) => c.op === "delete")).toBeDefined();
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining("Delete after hash save failed")
+    );
+  });
 });
 
 describe("cleanupStaleArticles", () => {
@@ -343,6 +361,21 @@ describe("cleanupStaleArticles", () => {
     expect(calls.find((c) => c.op === "upsert")).toBeUndefined();
     expect(calls.find((c) => c.op === "delete")).toBeUndefined();
     expect(calls.find((c) => c.op === "update")).toBeUndefined();
+  });
+
+  test("null-hash update fails: logs error and those rows not counted", async () => {
+    selectResults["news:select"] = {
+      data: [{ id: "s1", hash: null }],
+      error: null,
+    };
+    updateResult = { error: { message: "update kaput" } };
+
+    const count = await cleanupStaleArticles(fakeClient, 24);
+    // The update failed, so nullHashMarked stays 0; no rows were deleted either
+    expect(count).toBe(0);
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining("Failed to mark")
+    );
   });
 
   test("uses the configured retentionHours to compute cutoff", async () => {

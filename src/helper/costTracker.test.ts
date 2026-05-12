@@ -76,6 +76,14 @@ describe("getTodaysCost", () => {
     const cost = await getTodaysCost();
     expect(cost).toBe(Infinity);
   });
+
+  it("returns Infinity when createClient throws (catch path)", async () => {
+    // Make rpc throw an error to trigger the catch block
+    mockRpc.mockRejectedValue(new Error("connection refused"));
+
+    const cost = await getTodaysCost();
+    expect(cost).toBe(Infinity);
+  });
 });
 
 describe("hasAiBudget", () => {
@@ -157,6 +165,16 @@ describe("logAiUsage", () => {
       logAiUsage("question_answerer", 500, 100)
     ).resolves.toBeUndefined();
   });
+
+  it("does not throw when insert rejects (catch path)", async () => {
+    mockFrom.mockImplementation(() => {
+      throw new Error("db unavailable");
+    });
+
+    await expect(
+      logAiUsage("question_answerer", 500, 100)
+    ).resolves.toBeUndefined();
+  });
 });
 
 // Import priority-related functions
@@ -164,6 +182,7 @@ const {
   AI_PRIORITY,
   getAiPriority,
   hasAiBudgetForPriority,
+  hasAiBudgetForSource,
   DEFAULT_DAILY_LIMIT_USD,
 } = await import("./costTracker.js");
 
@@ -273,5 +292,34 @@ describe("hasAiBudgetForPriority", () => {
     expect(await hasAiBudgetForPriority(AI_PRIORITY.LOW)).toBe(false);
     expect(await hasAiBudgetForPriority(AI_PRIORITY.MEDIUM)).toBe(false);
     expect(await hasAiBudgetForPriority(AI_PRIORITY.CRITICAL)).toBe(true);
+  });
+});
+
+describe("hasAiBudgetForSource", () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    process.env = { ...originalEnv };
+    process.env.AI_DAILY_COST_LIMIT_USD = "0.20";
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  it("returns true for question_answerer when budget is available", async () => {
+    mockRpc.mockResolvedValue({ data: 0.01, error: null }); // 5% of 0.20
+    expect(await hasAiBudgetForSource("question_answerer")).toBe(true);
+  });
+
+  it("returns false for low priority sources when budget is mostly used", async () => {
+    mockRpc.mockResolvedValue({ data: 0.07, error: null }); // 35% > 30% threshold for LOW
+    expect(await hasAiBudgetForSource("hashtag_generation")).toBe(false);
+  });
+
+  it("returns false for unknown sources when budget threshold is exceeded", async () => {
+    mockRpc.mockResolvedValue({ data: 0.07, error: null }); // exceeds LOW threshold
+    expect(await hasAiBudgetForSource("unknown_feature")).toBe(false);
   });
 });
