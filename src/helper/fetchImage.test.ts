@@ -95,4 +95,26 @@ describe("fetchImage", () => {
     expect(result).toBeInstanceOf(Blob);
     expect(result!.type).toBe("image/jpeg");
   });
+
+  test("timeout callback aborts the request after 15 seconds", async () => {
+    jest.useFakeTimers();
+    let signalRef: AbortSignal | undefined;
+    globalThis.fetch = jest.fn<typeof fetch>().mockImplementation((_, init) => {
+      signalRef = (init as RequestInit)?.signal as AbortSignal | undefined;
+      return new Promise((_, reject) => {
+        if (signalRef) {
+          signalRef.addEventListener("abort", () =>
+            reject(new DOMException("The operation was aborted.", "AbortError"))
+          );
+        }
+      });
+    });
+
+    const resultPromise = fetchImage("https://example.com/slow.png");
+    jest.advanceTimersByTime(15001);
+    const result = await resultPromise;
+    expect(result).toBeNull();
+    expect(signalRef?.aborted).toBe(true);
+    jest.useRealTimers();
+  });
 });

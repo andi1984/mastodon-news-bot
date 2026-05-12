@@ -82,6 +82,9 @@
     "resetMocks": false,
     "clearMocks": true,
     "testEnvironment": "node",
+    "maxWorkers": "50%",
+    "testTimeout": 10000,
+    "forceExit": true,
     "collectCoverageFrom": [
       "src/**/*.ts",
       "!src/**/*.test.ts",

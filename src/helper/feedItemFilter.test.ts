@@ -161,4 +161,19 @@ describe("filterFeedItemsByAge", () => {
     expect(result.accepted[0].item.title).toBe("Fresh article");
     expect(result.filteredCount).toBe(2);
   });
+
+  it("uses current time as default when now is not provided (default parameter branch)", () => {
+    // Recent item should pass when now defaults to current time
+    const recentDate = new Date();
+    recentDate.setHours(recentDate.getHours() - 1); // 1 hour ago
+    const items: RawFeedItem[] = [
+      { title: "Recent item", pubDate: recentDate.toISOString() },
+    ];
+
+    // Call WITHOUT the 'now' argument to exercise the default parameter branch
+    const result = filterFeedItemsByAge(items, 24);
+
+    expect(result.accepted).toHaveLength(1);
+    expect(result.filteredCount).toBe(0);
+  });
 });

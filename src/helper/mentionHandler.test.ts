@@ -209,6 +209,27 @@ describe("handleMentions", () => {
     expect(mockDismiss).not.toHaveBeenCalled();
   });
 
+  test("dismisses silently when qa_enabled is false (lines 49-50)", async () => {
+    mockList.mockResolvedValue([
+      {
+        id: "8",
+        status: {
+          id: "800",
+          inReplyToId: null,
+          content: "<p>@saarlandnews Gibt es Neuigkeiten?</p>",
+          account: { acct: "other" },
+        },
+      },
+    ]);
+
+    await handleMentions(mockClient, { ...defaultConfig, qa_enabled: false });
+
+    expect(mockAnswerQuestion).not.toHaveBeenCalled();
+    expect(mockCreate).not.toHaveBeenCalled();
+    expect(mockNotifSelect).toHaveBeenCalledWith("8");
+    expect(mockDismiss).toHaveBeenCalled();
+  });
+
   test("dismisses notification without status", async () => {
     mockList.mockResolvedValue([
       {

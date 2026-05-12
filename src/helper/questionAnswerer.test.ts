@@ -153,6 +153,47 @@ describe("extractKeywords", () => {
 
     expect(result).toEqual([]);
   });
+
+  it("returns empty array and warns when AI returns object with empty keywords and variants (lines 86-87)", async () => {
+    mockAiResponse(JSON.stringify({ keywords: [], variants: [] }));
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await extractKeywords("Was gibt es Neues?");
+
+    expect(result).toEqual([]);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("empty search terms")
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("returns empty array and warns on invalid AI response format (lines 100-104)", async () => {
+    // An array of non-strings triggers the "invalid AI response format" warn
+    // (Array.isArray is true but NOT every element is a string)
+    mockAiResponse(JSON.stringify([1, 2, 3]));
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await extractKeywords("Wie wird das Wetter?");
+
+    expect(result).toEqual([]);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("invalid AI response format")
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("returns empty array when API call throws (catch block lines 103-104)", async () => {
+    mockMessagesCreate.mockRejectedValue(new Error("network error"));
+    const errSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await extractKeywords("Was passiert in Saarbrücken?");
+
+    expect(result).toEqual([]);
+    expect(errSpy).toHaveBeenCalledWith(
+      expect.stringContaining("keyword extraction failed")
+    );
+    errSpy.mockRestore();
+  });
 });
 
 describe("searchArticles", () => {
@@ -185,6 +226,15 @@ describe("searchArticles", () => {
     const result = await searchArticles(["Radweg"], defaultSettings);
 
     expect(result).toEqual([]);
+  });
+
+  it("returns empty array when all keywords are empty after sanitization (line 119)", async () => {
+    // Keywords that become empty after stripping special chars produce an empty tsQuery
+    const result = await searchArticles(["---", "!!!"], defaultSettings);
+
+    expect(result).toEqual([]);
+    // DB should not be queried
+    expect(mockDbFrom).not.toHaveBeenCalled();
   });
 
   it("returns empty array when no results", async () => {

@@ -474,3 +474,305 @@ describe("releaseCanonicalUrls", () => {
     );
   });
 });
+
+// ─── claimArticles: extended tests covering lines 98-172 ─────────────────────
+//
+// claimArticles makes TWO selects (news table then tooted_hashes), plus an
+// optional upsert.  We need per-table select results, so we introduce a new
+// helper `makeMultiResultFrom` that returns different data depending on which
+// table is queried.
+
+describe("claimArticles — canonical_url paths (lines 98-172)", () => {
+  let errorSpy: jest.SpiedFunction<typeof console.error>;
+
+  // Per-table select results so we can differentiate the two SELECT calls.
+  let newsSelectResult: { data: any; error: any };
+  let tootedHashesSelectResult: { data: any; error: any };
+
+  function makeMultiResultFrom(table: string) {
+    return {
+      select: (...args: any[]) => {
+        const call: Call = { table, op: "select", args };
+        calls.push(call);
+        return {
+          in: (col: string, values: any) => {
+            call.filter = { method: "in", col, values };
+            const result =
+              table === "tooted_hashes"
+                ? tootedHashesSelectResult
+                : newsSelectResult;
+            return Promise.resolve(result);
+          },
+        };
+      },
+      upsert: (...args: any[]) => {
+        const [rows, options] = args;
+        calls.push({ table, op: "upsert", args: [rows], upsertOptions: options });
+        return Promise.resolve(upsertResult);
+      },
+      delete: () => {
+        const call: Call = { table, op: "delete", args: [] };
+        calls.push(call);
+        return {
+          in: (col: string, values: any) => {
+            call.filter = { method: "in", col, values };
+            return Promise.resolve(deleteResult);
+          },
+        };
+      },
+      update: (...args: any[]) => {
+        const [payload] = args;
+        const call: Call = { table, op: "update", args: [payload] };
+        calls.push(call);
+        return {
+          in: (col: string, values: any) => {
+            call.filter = { method: "in", col, values };
+            return Promise.resolve(updateResult);
+          },
+        };
+      },
+    };
+  }
+
+  const multiMockFrom = jest.fn((table: string) => makeMultiResultFrom(table));
+  const multiDb: any = { from: multiMockFrom };
+
+  beforeEach(() => {
+    calls = [];
+    newsSelectResult = { data: [], error: null };
+    tootedHashesSelectResult = { data: [], error: null };
+    upsertResult = { error: null };
+    deleteResult = { error: null };
+    updateResult = { error: null };
+    multiMockFrom.mockClear();
+    errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  test("articles with canonical_url, none existing in tooted_hashes — proceeds and claims all", async () => {
+    newsSelectResult = {
+      data: [
+        { id: "a1", hash: "h1", canonical_url: "https://sr.de/a" },
+        { id: "a2", hash: "h2", canonical_url: "https://sr.de/b" },
+      ],
+      error: null,
+    };
+    // tooted_hashes precheck returns empty — no conflicts
+    tootedHashesSelectResult = { data: [], error: null };
+
+    const result = await claimArticles(multiDb, ["a1", "a2"], "all-new");
+
+    expect(result.proceedArticleIds).toEqual(["a1", "a2"]);
+    expect(result.conflictArticleIds).toEqual([]);
+    expect(result.claimedCanonicalUrls).toEqual(["https://sr.de/a", "https://sr.de/b"]);
+
+    // Should have upserted into tooted_hashes
+    const upsertCall = calls.find(
+      (c) => c.op === "upsert" && c.table === "tooted_hashes"
+    );
+    expect(upsertCall).toBeDefined();
+    expect(upsertCall!.args[0]).toEqual([
+      { hash: "h1", canonical_url: "https://sr.de/a" },
+      { hash: "h2", canonical_url: "https://sr.de/b" },
+    ]);
+    expect(upsertCall!.upsertOptions).toEqual({
+      onConflict: "canonical_url",
+      ignoreDuplicates: true,
+    });
+  });
+
+  test("mix of articles with and without canonical_url — both sets proceed", async () => {
+    newsSelectResult = {
+      data: [
+        { id: "a1", hash: "h1", canonical_url: "https://sr.de/a" },
+        { id: "a2", hash: "h2", canonical_url: null },
+      ],
+      error: null,
+    };
+    tootedHashesSelectResult = { data: [], error: null };
+
+    const result = await claimArticles(multiDb, ["a1", "a2"], "mixed");
+
+    // Both should proceed: a1 via canonical_url claim, a2 via hash-only path
+    expect(result.proceedArticleIds).toContain("a1");
+    expect(result.proceedArticleIds).toContain("a2");
+    expect(result.conflictArticleIds).toEqual([]);
+    expect(result.claimedCanonicalUrls).toEqual(["https://sr.de/a"]);
+  });
+
+  test("all canonical_urls already exist in tooted_hashes — all conflict", async () => {
+    newsSelectResult = {
+      data: [
+        { id: "a1", hash: "h1", canonical_url: "https://sr.de/a" },
+        { id: "a2", hash: "h2", canonical_url: "https://sr.de/b" },
+      ],
+      error: null,
+    };
+    // Both URLs already claimed
+    tootedHashesSelectResult = {
+      data: [
+        { canonical_url: "https://sr.de/a" },
+        { canonical_url: "https://sr.de/b" },
+      ],
+      error: null,
+    };
+
+    const result = await claimArticles(multiDb, ["a1", "a2"], "all-conflict");
+
+    expect(result.proceedArticleIds).toEqual([]);
+    expect(result.conflictArticleIds).toEqual(["a1", "a2"]);
+    expect(result.claimedCanonicalUrls).toEqual([]);
+
+    // No upsert should have happened (nothing to insert)
+    const upsertCall = calls.find(
+      (c) => c.op === "upsert" && c.table === "tooted_hashes"
+    );
+    expect(upsertCall).toBeUndefined();
+  });
+
+  test("partial conflict: some URLs claimed, some new — correct split", async () => {
+    newsSelectResult = {
+      data: [
+        { id: "a1", hash: "h1", canonical_url: "https://sr.de/a" },
+        { id: "a2", hash: "h2", canonical_url: "https://sr.de/b" },
+        { id: "a3", hash: "h3", canonical_url: null },
+      ],
+      error: null,
+    };
+    // Only first URL already claimed
+    tootedHashesSelectResult = {
+      data: [{ canonical_url: "https://sr.de/a" }],
+      error: null,
+    };
+
+    const result = await claimArticles(
+      multiDb,
+      ["a1", "a2", "a3"],
+      "partial-conflict"
+    );
+
+    expect(result.conflictArticleIds).toEqual(["a1"]);
+    // a2 (new URL) and a3 (no URL) both proceed
+    expect(result.proceedArticleIds).toContain("a2");
+    expect(result.proceedArticleIds).toContain("a3");
+    expect(result.claimedCanonicalUrls).toEqual(["https://sr.de/b"]);
+  });
+
+  test("tooted_hashes precheck error treats all as conflict", async () => {
+    newsSelectResult = {
+      data: [{ id: "a1", hash: "h1", canonical_url: "https://sr.de/a" }],
+      error: null,
+    };
+    tootedHashesSelectResult = {
+      data: null,
+      error: { message: "precheck boom" },
+    };
+
+    const result = await claimArticles(multiDb, ["a1"], "precheck-err");
+
+    expect(result.proceedArticleIds).toEqual([]);
+    expect(result.conflictArticleIds).toEqual(["a1"]);
+    expect(result.claimedCanonicalUrls).toEqual([]);
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("precheck-err")
+    );
+    expect(errorSpy.mock.calls[0][0]).toContain("precheck boom");
+  });
+
+  test("upsert insert error treats all as conflict", async () => {
+    newsSelectResult = {
+      data: [{ id: "a1", hash: "h1", canonical_url: "https://sr.de/a" }],
+      error: null,
+    };
+    tootedHashesSelectResult = { data: [], error: null };
+    upsertResult = { error: { message: "upsert boom" } };
+
+    const result = await claimArticles(multiDb, ["a1"], "upsert-err");
+
+    expect(result.proceedArticleIds).toEqual([]);
+    expect(result.conflictArticleIds).toEqual(["a1"]);
+    expect(result.claimedCanonicalUrls).toEqual([]);
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("upsert-err")
+    );
+  });
+
+  test("article with canonical_url but null hash falls back to claim: prefix", async () => {
+    newsSelectResult = {
+      data: [
+        { id: "a1", hash: null, canonical_url: "https://sr.de/a" },
+      ],
+      error: null,
+    };
+    tootedHashesSelectResult = { data: [], error: null };
+
+    const result = await claimArticles(multiDb, ["a1"], "null-hash");
+
+    expect(result.proceedArticleIds).toEqual(["a1"]);
+    expect(result.claimedCanonicalUrls).toEqual(["https://sr.de/a"]);
+
+    const upsertCall = calls.find(
+      (c) => c.op === "upsert" && c.table === "tooted_hashes"
+    );
+    expect(upsertCall).toBeDefined();
+    // hash should be the claim: fallback
+    expect(upsertCall!.args[0][0].hash).toBe("claim:https://sr.de/a");
+    expect(upsertCall!.args[0][0].canonical_url).toBe("https://sr.de/a");
+  });
+
+  test("all URLs conflict + articles without URL: no-URL articles still proceed (line 131)", async () => {
+    // All articles with canonical_url are in conflict, but there are also
+    // articles without a canonical_url.  The latter should proceed via
+    // hash-only path.
+    newsSelectResult = {
+      data: [
+        { id: "url-article", hash: "h1", canonical_url: "https://sr.de/a" },
+        { id: "no-url-article", hash: "h2", canonical_url: null },
+      ],
+      error: null,
+    };
+    // The URL is already claimed — conflict
+    tootedHashesSelectResult = {
+      data: [{ canonical_url: "https://sr.de/a" }],
+      error: null,
+    };
+
+    const result = await claimArticles(
+      multiDb,
+      ["url-article", "no-url-article"],
+      "conflict-and-no-url"
+    );
+
+    // url-article conflicts, no-url-article proceeds
+    expect(result.conflictArticleIds).toEqual(["url-article"]);
+    expect(result.proceedArticleIds).toEqual(["no-url-article"]);
+    expect(result.claimedCanonicalUrls).toEqual([]);
+  });
+
+  test("deduplicates canonical_urls before precheck when articles share the same URL", async () => {
+    newsSelectResult = {
+      data: [
+        { id: "a1", hash: "h1", canonical_url: "https://sr.de/same" },
+        { id: "a2", hash: "h2", canonical_url: "https://sr.de/same" },
+      ],
+      error: null,
+    };
+    tootedHashesSelectResult = { data: [], error: null };
+
+    const result = await claimArticles(
+      multiDb,
+      ["a1", "a2"],
+      "dedup-urls"
+    );
+
+    // Both should proceed since the URL is new
+    expect(result.proceedArticleIds).toContain("a1");
+    expect(result.proceedArticleIds).toContain("a2");
+
+    // The precheck select should be for unique URLs only
+    const precheckCall = calls.find(
+      (c) => c.op === "select" && c.table === "tooted_hashes"
+    );
+    expect(precheckCall).toBeDefined();
+    expect(precheckCall!.filter!.values).toEqual(["https://sr.de/same"]);
+  });
+});

@@ -1,4 +1,12 @@
-import {
+import { jest, describe, it, expect, beforeEach } from "@jest/globals";
+
+const mockBatchSemanticSimilarity = jest.fn();
+
+jest.unstable_mockModule("./semanticSimilarity", () => ({
+  batchSemanticSimilarity: mockBatchSemanticSimilarity,
+}));
+
+const {
   tokenize,
   jaccardSimilarity,
   timeProximityScore,
@@ -6,8 +14,9 @@ import {
   clusterArticles,
   pickPrimaryArticle,
   isBreakingNews,
-  ClusterArticle,
-} from "./similarity.js";
+} = await import("./similarity.js");
+
+import type { ClusterArticle } from "./similarity.js";
 
 function makeArticle(
   overrides: Partial<ClusterArticle> & {
@@ -412,5 +421,66 @@ describe("isBreakingNews", () => {
     ];
     // No window of 3 articles within 2h
     expect(isBreakingNews(cluster, 2, 3)).toBe(false);
+  });
+});
+
+describe("clusterArticles — semantic matching (lines 151, 164-188)", () => {
+  // Pair design: articles 4h apart with 1 shared token out of 8.
+  // storySimilarity = 0.7 * (1/8) + 0.3 * (1-(4-2)/10) = 0.7*0.125 + 0.3*0.8 = 0.3275
+  // → above JACCARD_UNCERTAIN_LOW (0.18) but below JACCARD_DEFINITE_MATCH (0.45)
+  const base = new Date("2024-06-15T10:00:00Z");
+  const fourHoursLater = new Date(base.getTime() + 4 * 3600000);
+
+  function makeUncertainPair(): ClusterArticle[] {
+    return [
+      makeArticle({
+        id: "1",
+        title: "Wohnungsbrand Saarlouis Feuerwehr Großeinsatz",
+        feedKey: "feed-a",
+        pubDate: base.toISOString(),
+      }),
+      makeArticle({
+        id: "2",
+        title: "Brand Saarlouis Innenstadt Bewohner evakuiert",
+        feedKey: "feed-b",
+        pubDate: fourHoursLater.toISOString(),
+      }),
+    ];
+  }
+
+  beforeEach(() => {
+    mockBatchSemanticSimilarity.mockReset();
+  });
+
+  it("queues uncertain pairs for semantic matching and clusters on high score", async () => {
+    // Return a high semantic score so they cluster
+    mockBatchSemanticSimilarity.mockResolvedValue([
+      { indexA: 0, indexB: 1, score: 0.92 },
+    ]);
+
+    const clusters = await clusterArticles(makeUncertainPair(), 0.4, true);
+    expect(mockBatchSemanticSimilarity).toHaveBeenCalled();
+    expect(clusters.size).toBe(1);
+  });
+
+  it("does not cluster when semantic score is below threshold", async () => {
+    // Low semantic score — don't cluster
+    mockBatchSemanticSimilarity.mockResolvedValue([
+      { indexA: 0, indexB: 1, score: 0.5 },
+    ]);
+
+    const clusters = await clusterArticles(makeUncertainPair(), 0.4, true);
+    expect(mockBatchSemanticSimilarity).toHaveBeenCalled();
+    expect(clusters.size).toBe(2);
+  });
+
+  it("stops semantic batching when API returns empty results (budget exceeded path)", async () => {
+    // Empty results simulate budget exceeded
+    mockBatchSemanticSimilarity.mockResolvedValue([]);
+
+    const clusters = await clusterArticles(makeUncertainPair(), 0.4, true);
+    expect(mockBatchSemanticSimilarity).toHaveBeenCalled();
+    // Articles remain separate since semantic matching was skipped
+    expect(clusters.size).toBe(2);
   });
 });

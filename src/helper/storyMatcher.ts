@@ -148,7 +148,7 @@ export async function findMatchingStory(
 // Adapter wiring chooseStoryMatch's semantic-check callback to the existing
 // batchSemanticSimilarity client. Keeping the wiring out of the pure decision
 // function lets us unit-test chooseStoryMatch without mocking the AI client.
-const semanticCheckAdapter: SemanticChecker = async (pairs) => {
+export const semanticCheckAdapter: SemanticChecker = async (pairs) => {
   if (pairs.length === 0) return new Map();
   const semanticPairs: SemanticPair[] = pairs.map((p, idx) => ({
     indexA: idx,
