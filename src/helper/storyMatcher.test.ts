@@ -682,20 +682,28 @@ describe("addArticleToStory", () => {
 // assignStoryToArticle
 // -------------------------------------------------------------------------
 describe("assignStoryToArticle", () => {
-  it("calls update with story_id and eq on article id", async () => {
-    const mockUpdateEq = jest.fn().mockResolvedValue({ error: null });
-    const mockUpdate = jest.fn().mockReturnValue({ eq: mockUpdateEq });
+  function makeUpdateChain(result: { error: any }) {
+    // Chain: .update({}).eq(col, val).is(col, val) → resolves
+    const mockIs = jest.fn().mockResolvedValue(result);
+    const mockEq = jest.fn().mockReturnValue({ is: mockIs });
+    const mockUpdate = jest.fn().mockReturnValue({ eq: mockEq });
+    return { mockUpdate, mockEq, mockIs };
+  }
+
+  it("calls update with story_id, eq on article id, and is(story_id, null) guard", async () => {
+    const { mockUpdate, mockEq, mockIs } = makeUpdateChain({ error: null });
     mockFrom.mockReturnValue({ update: mockUpdate });
 
     await assignStoryToArticle("article-1", "story-1", "news");
 
     expect(mockUpdate).toHaveBeenCalledWith({ story_id: "story-1" });
-    expect(mockUpdateEq).toHaveBeenCalledWith("id", "article-1");
+    expect(mockEq).toHaveBeenCalledWith("id", "article-1");
+    // Guard: only assign articles that don't yet have a story_id
+    expect(mockIs).toHaveBeenCalledWith("story_id", null);
   });
 
   it("logs error when update fails", async () => {
-    const mockUpdateEq = jest.fn().mockResolvedValue({ error: { message: "Update error" } });
-    const mockUpdate = jest.fn().mockReturnValue({ eq: mockUpdateEq });
+    const { mockUpdate } = makeUpdateChain({ error: { message: "Update error" } });
     mockFrom.mockReturnValue({ update: mockUpdate });
 
     const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
@@ -914,6 +922,18 @@ describe("getUntootedStories", () => {
 // processNewArticles
 // -------------------------------------------------------------------------
 describe("processNewArticles", () => {
+  // assignStoryToArticle now has a .is("story_id", null) guard after .eq().
+  // addArticleToStory ends at .eq() with no further chaining.
+  // Both paths share the same mockFrom, so .eq() must return something that:
+  //   (a) resolves directly (for addArticleToStory: `await db.update().eq()`)
+  //   (b) has an .is() method (for assignStoryToArticle: `await db.update().eq().is()`)
+  function makeChainableEqResult(result = { error: null }) {
+    return {
+      is: jest.fn().mockResolvedValue(result),
+      then: (resolve: any, reject: any) => Promise.resolve(result).then(resolve, reject),
+    };
+  }
+
   it("does nothing for empty articles array", async () => {
     await processNewArticles([], "news");
     expect(mockFrom).not.toHaveBeenCalled();
@@ -926,7 +946,7 @@ describe("processNewArticles", () => {
 
     // addArticleToStory: select → eq → single (fetch count), then update → eq
     const mockSingle = jest.fn().mockResolvedValue({ data: { article_count: 2 }, error: null });
-    const mockUpdateEq = jest.fn().mockResolvedValue({ error: null });
+    const mockUpdateEq = jest.fn().mockReturnValue(makeChainableEqResult());
     const mockUpdate = jest.fn().mockReturnValue({ eq: mockUpdateEq });
 
     mockFrom.mockImplementation(() => ({
@@ -951,7 +971,7 @@ describe("processNewArticles", () => {
     const mockInsertSingle = jest.fn().mockResolvedValue({ data: { id: "new-story" }, error: null });
     const mockLimit = jest.fn().mockResolvedValue({ data: [], error: null });
     const mockOrder = jest.fn().mockReturnValue({ limit: mockLimit });
-    const mockUpdateEq = jest.fn().mockResolvedValue({ error: null });
+    const mockUpdateEq = jest.fn().mockReturnValue(makeChainableEqResult());
 
     mockFrom.mockImplementation(() => ({
       select: jest.fn().mockReturnValue({
@@ -981,7 +1001,7 @@ describe("processNewArticles", () => {
       insertCallCount++;
       return { data: { id: `new-story-${insertCallCount}` }, error: null };
     });
-    const mockUpdateEq = jest.fn().mockResolvedValue({ error: null });
+    const mockUpdateEq = jest.fn().mockReturnValue(makeChainableEqResult());
     const mockFetchSingle = jest.fn().mockResolvedValue({ data: { article_count: 1 }, error: null });
     const mockLimit = jest.fn().mockResolvedValue({ data: [], error: null });
     const mockOrder = jest.fn().mockReturnValue({ limit: mockLimit });

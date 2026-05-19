@@ -629,10 +629,14 @@ type StoryInfo = {
       // Append the just-posted links to the story's original_links so the
       // next tooter tick treats them as already-seen even if they're
       // re-ingested with a fresh hash (e.g. cosmetic title change).
+      // Only extend with usableArticles (actually posted), not `articles`
+      // (which includes filtered-out duplicates). Adding a duplicate's URL
+      // would poison original_links: a future article with that URL would
+      // be routed to this story via findStoryByUrl, creating a wrong thread.
       await extendStoryOriginalLinks(
         db,
         storyId,
-        articles.map((a) => a.article.link || "")
+        usableArticles.map((a) => a.article.link || "")
       );
 
       await saveHashesAndFinalize(db, usableIds, "thread-reply");

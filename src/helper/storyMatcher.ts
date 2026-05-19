@@ -252,10 +252,14 @@ export async function assignStoryToArticle(
 ): Promise<void> {
   const db = createClient();
 
+  // Only assign if not yet assigned: prevents re-ingested articles (hash
+  // drift, cosmetic title change) from migrating to a different story and
+  // appearing as "Update:" replies under the wrong thread.
   const { error } = await db
     .from(dbTable)
     .update({ story_id: storyId })
-    .eq("id", articleId);
+    .eq("id", articleId)
+    .is("story_id", null);
 
   if (error) {
     console.error(
