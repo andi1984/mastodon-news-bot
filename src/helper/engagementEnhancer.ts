@@ -2,6 +2,12 @@ import Anthropic from "@anthropic-ai/sdk";
 import { hasAiBudgetForSource, logAiUsage } from "./costTracker.js";
 import { parseAiJson } from "./parseAiJson.js";
 
+let _anthropicClient: Anthropic | null = null;
+function getAnthropicClient(apiKey: string): Anthropic {
+  if (!_anthropicClient) _anthropicClient = new Anthropic({ apiKey });
+  return _anthropicClient;
+}
+
 /**
  * Topic emoji mapping - one subtle emoji prefix based on content category.
  * Keeps it professional, not spammy.
@@ -90,7 +96,7 @@ export async function analyzeForPoll(
       return { isDebatable: false };
     }
 
-    const client = new Anthropic({ apiKey });
+    const client = getAnthropicClient(apiKey);
     const response = await client.messages.create({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 150,

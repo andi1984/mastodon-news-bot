@@ -7,6 +7,12 @@ import {
   _pairKeyForTesting as pairKey,
 } from "./aiCache.js";
 
+let _anthropicClient: Anthropic | null = null;
+function getAnthropicClient(apiKey: string): Anthropic {
+  if (!_anthropicClient) _anthropicClient = new Anthropic({ apiKey });
+  return _anthropicClient;
+}
+
 export interface SemanticPair {
   indexA: number;
   indexB: number;
@@ -82,7 +88,7 @@ export async function batchSemanticSimilarity(
     );
     const userPrompt = `Bewerte diese ${uncachedPairs.length} Artikelpaare:\n${pairLines.join("\n")}`;
 
-    const client = new Anthropic({ apiKey });
+    const client = getAnthropicClient(apiKey);
     const response = await client.messages.create({
       model: "claude-haiku-4-5-20251001",
       max_tokens: Math.min(uncachedPairs.length * 20 + 50, 1024),

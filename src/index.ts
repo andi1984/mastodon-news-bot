@@ -34,6 +34,16 @@ const ext = __dirname.includes("/src") ? "ts" : "js";
 const bree = new Bree({
   root: jobsRoot,
   defaultExtension: ext,
+  // Kill any worker that hasn't sent "done" within 5 minutes (prevents zombie threads).
+  closeWorkerAfterMs: 300_000,
+  // Cap each worker's V8 heap to force more aggressive GC and prevent runaway
+  // memory growth from frequent worker thread churn.
+  worker: {
+    resourceLimits: {
+      maxOldGenerationSizeMb: 512,
+      maxYoungGenerationSizeMb: 128,
+    },
+  },
   jobs: [
     // Feed grabber runs frequently to catch breaking news
     // Day (06:00-21:59): every 15 minutes
@@ -73,11 +83,12 @@ const bree = new Bree({
       path: path.join(jobsRoot, `weekly-digest.${ext}`),
       cron: "0 20 * * 0",
     },
-    // Mention replier - check and respond every 5 minutes
+    // Mention replier - check and respond every 10 minutes (reduced from 5m to
+    // halve worker thread churn; most runs find nothing to do).
     {
       name: "mention-replier",
       path: path.join(jobsRoot, `mention-replier.${ext}`),
-      interval: "5m",
+      interval: "10m",
     },
     // Duplicate toot cleanup - every 31 minutes
     {

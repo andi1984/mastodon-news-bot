@@ -2,6 +2,12 @@ import Anthropic from "@anthropic-ai/sdk";
 import { hasAiBudgetForSource, logAiUsage } from "./costTracker.js";
 import { parseAiJson } from "./parseAiJson.js";
 
+let _anthropicClient: Anthropic | null = null;
+function getAnthropicClient(apiKey: string): Anthropic {
+  if (!_anthropicClient) _anthropicClient = new Anthropic({ apiKey });
+  return _anthropicClient;
+}
+
 /**
  * Topic keywords → hashtags mapping
  * Extends the TOPIC_EMOJIS pattern from engagementEnhancer.ts
@@ -132,7 +138,7 @@ async function getAiHashtags(
       return [];
     }
 
-    const client = new Anthropic({ apiKey });
+    const client = getAnthropicClient(apiKey);
     const prompt = AI_HASHTAG_PROMPT.replace("{existingTags}", existingTags.join(", "));
 
     const response = await client.messages.create({

@@ -18,11 +18,19 @@ const fetchWithRetry: typeof fetch = async (input, init) => {
   let lastError: Error | null = null;
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    // Use AbortController + clearTimeout so the timer is released as soon as
+    // the request completes, instead of holding a reference for the full 30s.
+    const ownSignal = !init?.signal;
+    const ac = ownSignal ? new AbortController() : null;
+    const timeoutId = ac ? setTimeout(() => ac.abort(), 30000) : null;
+
     try {
       const response = await fetch(input, {
         ...init,
-        signal: init?.signal ?? AbortSignal.timeout(30000), // 30s timeout
+        signal: ac ? ac.signal : init!.signal,
       });
+
+      if (timeoutId !== null) clearTimeout(timeoutId);
 
       // Retry on 5xx errors (server issues)
       if (response.status >= 500 && attempt < MAX_RETRIES - 1) {
@@ -33,6 +41,7 @@ const fetchWithRetry: typeof fetch = async (input, init) => {
 
       return response;
     } catch (err) {
+      if (timeoutId !== null) clearTimeout(timeoutId);
       lastError = err as Error;
 
       // Don't retry on abort/timeout or final attempt
