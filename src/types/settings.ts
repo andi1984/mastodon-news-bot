@@ -1,3 +1,9 @@
+export type KeywordFilterSettings = {
+  enabled: boolean;
+  keywords: string[];
+  exempt_feeds: string[];
+};
+
 type SingleCWMapping = {
   label: string;
   id: string;
@@ -44,6 +50,7 @@ export type Settings = {
   breaking_news_priority_boost?: number;
   regional_relevance?: RegionalRelevanceSettings;
   semantic_similarity?: SemanticSimilaritySettings;
+  keyword_filter?: KeywordFilterSettings;
   qa_enabled?: boolean;
   qa_max_results?: number;
   qa_min_text_length?: number;

@@ -5,7 +5,10 @@ const require = createRequire(import.meta.url);
 const settings = require("../data/settings.json");
 
 import getFeed from "../helper/getFeed.js";
-import { filterFeedItemsByAge } from "../helper/feedItemFilter.js";
+import {
+  filterFeedItemsByAge,
+  filterFeedItemsByKeywords,
+} from "../helper/feedItemFilter.js";
 import createClient from "../helper/db.js";
 import { sha256 } from "../helper/hash.js";
 import { normalizeUrl } from "../helper/normalizeUrl.js";
@@ -57,7 +60,21 @@ async function fetchFeedCandidates(
       console.log(`[${feedKey}] Filtered out ${filteredCount} articles older than ${MAX_ARTICLE_AGE_HOURS}h`);
     }
 
-    return accepted.map(({ item, pubDate }) => ({
+    const kwFilter = settings.keyword_filter;
+    let freshItems = accepted;
+    if (
+      kwFilter?.enabled &&
+      kwFilter.keywords?.length > 0 &&
+      !kwFilter.exempt_feeds?.includes(feedKey)
+    ) {
+      const kwResult = filterFeedItemsByKeywords(accepted, kwFilter.keywords);
+      if (kwResult.filteredCount > 0) {
+        console.log(`[${feedKey}] Filtered out ${kwResult.filteredCount} articles not matching keywords`);
+      }
+      freshItems = kwResult.accepted;
+    }
+
+    return freshItems.map(({ item, pubDate }) => ({
       hash: `${tableId}-${sha256(item.title ?? "")}-${sha256(item.link ?? "")}`,
       canonical_url: normalizeUrl(item.link) || null,
       data: { ...item, _feedKey: feedKey },

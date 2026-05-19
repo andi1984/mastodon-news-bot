@@ -1,8 +1,79 @@
 import {
   parseFeedItemDate,
   filterFeedItemsByAge,
+  filterFeedItemsByKeywords,
+  FilteredFeedItem,
   RawFeedItem,
 } from "./feedItemFilter";
+
+const makeItem = (fields: Partial<RawFeedItem>): FilteredFeedItem => ({
+  item: fields,
+  pubDate: new Date("2026-03-28T10:00:00Z"),
+});
+
+describe("filterFeedItemsByKeywords", () => {
+  const keywords = ["saarland", "saarbrücken"];
+
+  it("accepts item whose title contains a keyword", () => {
+    const items = [makeItem({ title: "News aus Saarland heute" })];
+    const { accepted, filteredCount } = filterFeedItemsByKeywords(items, keywords);
+    expect(accepted).toHaveLength(1);
+    expect(filteredCount).toBe(0);
+  });
+
+  it("accepts item whose contentSnippet contains a keyword", () => {
+    const items = [makeItem({ title: "Breaking", contentSnippet: "Ereignis in Saarbrücken" })];
+    const { accepted, filteredCount } = filterFeedItemsByKeywords(items, keywords);
+    expect(accepted).toHaveLength(1);
+    expect(filteredCount).toBe(0);
+  });
+
+  it("rejects item with no keyword match", () => {
+    const items = [makeItem({ title: "Bundesliga Ergebnis Bayern", contentSnippet: "Bayern gewinnt" })];
+    const { accepted, filteredCount } = filterFeedItemsByKeywords(items, keywords);
+    expect(accepted).toHaveLength(0);
+    expect(filteredCount).toBe(1);
+  });
+
+  it("is case-insensitive", () => {
+    const items = [makeItem({ title: "SAARLAND aktuell" })];
+    const { accepted } = filterFeedItemsByKeywords(items, keywords);
+    expect(accepted).toHaveLength(1);
+  });
+
+  it("returns all items when keywords list is empty", () => {
+    const items = [
+      makeItem({ title: "Unrelated article" }),
+      makeItem({ title: "Another irrelevant item" }),
+    ];
+    const { accepted, filteredCount } = filterFeedItemsByKeywords(items, []);
+    expect(accepted).toHaveLength(2);
+    expect(filteredCount).toBe(0);
+  });
+
+  it("handles empty items array", () => {
+    const { accepted, filteredCount } = filterFeedItemsByKeywords([], keywords);
+    expect(accepted).toHaveLength(0);
+    expect(filteredCount).toBe(0);
+  });
+
+  it("mixes accepted and rejected correctly", () => {
+    const items = [
+      makeItem({ title: "Saarland Nachrichten" }),
+      makeItem({ title: "Berlin Wetter" }),
+      makeItem({ title: "Konzert in Saarbrücken" }),
+    ];
+    const { accepted, filteredCount } = filterFeedItemsByKeywords(items, keywords);
+    expect(accepted).toHaveLength(2);
+    expect(filteredCount).toBe(1);
+  });
+
+  it("checks content and summary fields too", () => {
+    const items = [makeItem({ title: "Lokales", content: "Bericht über Saarland", summary: "" })];
+    const { accepted } = filterFeedItemsByKeywords(items, keywords);
+    expect(accepted).toHaveLength(1);
+  });
+});
 
 describe("parseFeedItemDate", () => {
   it("parses pubDate field", () => {

@@ -28,6 +28,41 @@ export function parseFeedItemDate(item: RawFeedItem): Date {
 }
 
 /**
+ * Filter feed items by keyword match — at least one keyword must appear in
+ * the title or contentSnippet/description (case-insensitive).
+ * Returns only matched items and a count of how many were dropped.
+ */
+export function filterFeedItemsByKeywords(
+  items: FilteredFeedItem[],
+  keywords: string[]
+): { accepted: FilteredFeedItem[]; filteredCount: number } {
+  if (keywords.length === 0) return { accepted: items, filteredCount: 0 };
+
+  const lower = keywords.map((k) => k.toLowerCase());
+  const accepted: FilteredFeedItem[] = [];
+  let filteredCount = 0;
+
+  for (const fi of items) {
+    const text = [
+      fi.item.title ?? "",
+      fi.item.contentSnippet ?? "",
+      fi.item.content ?? "",
+      fi.item.summary ?? "",
+    ]
+      .join(" ")
+      .toLowerCase();
+
+    if (lower.some((kw) => text.includes(kw))) {
+      accepted.push(fi);
+    } else {
+      filteredCount++;
+    }
+  }
+
+  return { accepted, filteredCount };
+}
+
+/**
  * Filter feed items by age, rejecting items older than maxAgeHours.
  */
 export function filterFeedItemsByAge(
