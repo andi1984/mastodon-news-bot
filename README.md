@@ -74,7 +74,7 @@ src/
 
 | Component | Technology |
 |-----------|------------|
-| Runtime | Node.js 20+ (ESM) |
+| Runtime | Node.js 24+ (ESM) |
 | Language | TypeScript |
 | Job Scheduler | [Bree](https://github.com/breejs/bree) |
 | Database | [Supabase](https://supabase.com) (PostgreSQL) |
@@ -86,7 +86,7 @@ src/
 
 ### Prerequisites
 
-- Node.js 20.6.0+
+- Node.js 24+ (older versions leak memory under Bree's worker-thread churn; `@supabase/supabase-js` ≥2.106 also requires the native `WebSocket` of Node ≥22)
 - A Mastodon account with API access
 - Supabase project (free tier works)
 - Claude API key (optional, for AI features)

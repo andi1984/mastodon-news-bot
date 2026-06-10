@@ -5,7 +5,7 @@ related articles into "stories", and posts them as toots/threads on Mastodon.
 
 ## Tech Stack
 
-- **Runtime:** Node.js ≥20.6, TypeScript (ESM), `tsx` for dev
+- **Runtime:** Node.js ≥24, TypeScript (ESM), `tsx` for dev (older Node leaks RSS under worker-thread churn; supabase-js ≥2.106 needs native WebSocket of Node ≥22)
 - **Scheduler:** [Bree](https://github.com/breejs/bree) — runs jobs in worker threads
 - **Mastodon client:** [`masto`](https://www.npmjs.com/package/masto)
 - **Database:** Supabase (Postgres) via `@supabase/supabase-js`
