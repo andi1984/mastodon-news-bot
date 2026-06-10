@@ -34,6 +34,31 @@ export function sanitizeHtml(html: string): string {
   return text.trim();
 }
 
+// Common German question/filler words that make useless search terms.
+const FALLBACK_STOPWORDS = new Set([
+  "aber", "alle", "auch", "beim", "bitte", "dann", "dass", "dein", "diese",
+  "dieser", "dieses", "doch", "eine", "einem", "einen", "einer", "eines",
+  "etwas", "gibt", "habe", "haben", "hallo", "heute", "ihre", "kann",
+  "können", "letzte", "letzten", "mich", "mein", "meine", "neues", "nicht",
+  "noch", "oder", "passiert", "schon", "sein", "sind", "über", "viel",
+  "wann", "warum", "weißt", "welche", "wenn", "werden", "wieder", "wird",
+  "wurde", "zum", "zur",
+]);
+
+/**
+ * Programmatic keyword extraction - used when the AI budget is exhausted or
+ * the API is unavailable, so mention replies keep working without Claude.
+ */
+export function extractKeywordsFallback(text: string): string[] {
+  const words = text
+    .split(/[^a-zA-ZäöüÄÖÜß0-9-]+/)
+    .map((w) => w.trim())
+    .filter(
+      (w) => w.length >= 4 && !FALLBACK_STOPWORDS.has(w.toLowerCase())
+    );
+  return [...new Set(words)].slice(0, 7);
+}
+
 function buildTsQuery(keywords: string[]): string {
   return keywords
     .map((kw) => kw.replace(/[^a-zA-ZäöüÄÖÜßéèêàáâ0-9]/g, ""))
@@ -63,7 +88,7 @@ export async function extractKeywords(text: string): Promise<string[]> {
       messages: [{ role: "user", content: text }],
     });
 
-    logAiUsage(
+    await logAiUsage(
       "question_answerer",
       response.usage.input_tokens,
       response.usage.output_tokens
@@ -195,7 +220,13 @@ export async function answerQuestion(
     return `@${userAcct} ${noResultsText}`;
   }
 
-  const keywords = await extractKeywords(text);
+  let keywords = await extractKeywords(text);
+
+  // AI unavailable (budget, key, error) - degrade to programmatic extraction
+  // so the bot still answers instead of going silent.
+  if (keywords.length === 0) {
+    keywords = extractKeywordsFallback(text);
+  }
 
   if (keywords.length === 0) {
     return `@${userAcct} ${noResultsText}`;

@@ -96,7 +96,7 @@ export async function batchSemanticSimilarity(
       messages: [{ role: "user", content: userPrompt }],
     });
 
-    logAiUsage(
+    await logAiUsage(
       "semantic_similarity",
       response.usage.input_tokens,
       response.usage.output_tokens

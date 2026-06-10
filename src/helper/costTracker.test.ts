@@ -28,15 +28,15 @@ describe("calculateCost", () => {
   });
 
   it("calculates cost for input tokens only", () => {
-    expect(calculateCost(1_000_000, 0)).toBeCloseTo(0.8);
+    expect(calculateCost(1_000_000, 0)).toBeCloseTo(1.0);
   });
 
   it("calculates cost for output tokens only", () => {
-    expect(calculateCost(0, 1_000_000)).toBeCloseTo(4.0);
+    expect(calculateCost(0, 1_000_000)).toBeCloseTo(5.0);
   });
 
   it("calculates combined cost", () => {
-    expect(calculateCost(500, 100)).toBeCloseTo(0.0008);
+    expect(calculateCost(500, 100)).toBeCloseTo(0.001);
   });
 });
 
@@ -100,7 +100,7 @@ describe("hasAiBudget", () => {
 
   it("uses default limit when no env var is configured", async () => {
     delete process.env.AI_DAILY_COST_LIMIT_USD;
-    mockRpc.mockResolvedValue({ data: 0.10, error: null }); // 50% of default 0.20
+    mockRpc.mockResolvedValue({ data: 0.02, error: null }); // 40% of default 0.05
 
     const result = await hasAiBudget();
     expect(result).toBe(true);
@@ -108,7 +108,7 @@ describe("hasAiBudget", () => {
 
   it("uses default limit when env var is 0 or invalid", async () => {
     process.env.AI_DAILY_COST_LIMIT_USD = "0";
-    mockRpc.mockResolvedValue({ data: 0.10, error: null }); // 50% of default 0.20
+    mockRpc.mockResolvedValue({ data: 0.02, error: null }); // 40% of default 0.05
 
     const result = await hasAiBudget();
     expect(result).toBe(true);
@@ -197,7 +197,7 @@ describe("AI_PRIORITY", () => {
 
 describe("DEFAULT_DAILY_LIMIT_USD", () => {
   it("is set to 0.15 (15 cents)", () => {
-    expect(DEFAULT_DAILY_LIMIT_USD).toBe(0.15);
+    expect(DEFAULT_DAILY_LIMIT_USD).toBe(0.05);
   });
 });
 
@@ -287,7 +287,7 @@ describe("hasAiBudgetForPriority", () => {
 
   it("uses default limit when env var not set", async () => {
     delete process.env.AI_DAILY_COST_LIMIT_USD;
-    mockRpc.mockResolvedValue({ data: 0.10, error: null }); // 67% of default 0.15
+    mockRpc.mockResolvedValue({ data: 0.033, error: null }); // 66% of default 0.05
 
     expect(await hasAiBudgetForPriority(AI_PRIORITY.LOW)).toBe(false);
     expect(await hasAiBudgetForPriority(AI_PRIORITY.MEDIUM)).toBe(false);

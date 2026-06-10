@@ -42,6 +42,25 @@ describe("parseAiJson", () => {
     expect(result).toEqual([{ a: 1, b: 2, s: 0.9 }]);
   });
 
+  it("salvages an array truncated mid-element (max_tokens cutoff)", () => {
+    const input = '[{"i":0,"c":"local"},{"i":1,"c":"nat';
+    const result = parseAiJson<{ i: number; c: string }[]>(input);
+    expect(result).toEqual([{ i: 0, c: "local" }]);
+  });
+
+  it("salvages an array truncated after a complete element", () => {
+    const input = '[{"i":0,"c":"local"},{"i":1,"c":"national"},';
+    const result = parseAiJson<{ i: number; c: string }[]>(input);
+    expect(result).toEqual([
+      { i: 0, c: "local" },
+      { i: 1, c: "national" },
+    ]);
+  });
+
+  it("throws on a truncated array with no complete element", () => {
+    expect(() => parseAiJson('[{"i":0,"c":"loc')).toThrow(SyntaxError);
+  });
+
   it("throws on invalid JSON", () => {
     expect(() => parseAiJson("not json")).toThrow(SyntaxError);
   });

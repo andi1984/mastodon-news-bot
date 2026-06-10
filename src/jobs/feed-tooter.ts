@@ -224,11 +224,17 @@ type StoryInfo = {
         title: a.article.title ?? "",
         feedKey: a.feedKey,
       })),
-      (settings as any).regional_relevance ?? {
-        enabled: false,
-        always_local_feeds: [],
-        multipliers: { local: 1, regional: 1, national: 1, international: 1 },
-      }
+      (settings as any).regional_relevance
+        ? {
+            ...(settings as any).regional_relevance,
+            // Saarland gazetteer: titles matching these are local without AI.
+            local_keywords: (settings as any).keyword_filter?.keywords ?? [],
+          }
+        : {
+            enabled: false,
+            always_local_feeds: [],
+            multipliers: { local: 1, regional: 1, national: 1, international: 1 },
+          }
     );
 
     for (let i = 0; i < allArticlesForScoring.length; i++) {

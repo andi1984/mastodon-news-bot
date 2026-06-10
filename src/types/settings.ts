@@ -13,6 +13,12 @@ type SingleCWMapping = {
 export type RegionalRelevanceSettings = {
   enabled: boolean;
   always_local_feeds: string[];
+  /**
+   * Saarland place names / keywords: a title containing one is classified
+   * "local" programmatically, skipping the AI call. Usually wired from
+   * keyword_filter.keywords by the caller.
+   */
+  local_keywords?: string[];
   multipliers: {
     local: number;
     regional: number;

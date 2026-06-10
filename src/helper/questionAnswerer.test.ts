@@ -307,8 +307,9 @@ describe("answerQuestion", () => {
     );
   });
 
-  it("returns no-results when no keywords extracted", async () => {
+  it("falls back to programmatic keywords when AI extracts none", async () => {
     mockAiResponse("[]");
+    mockDb([]); // fallback keywords match nothing in DB
 
     const result = await answerQuestion(
       "user",
@@ -320,6 +321,22 @@ describe("answerQuestion", () => {
     expect(result).toContain(
       "Leider habe ich dazu keine passenden Nachrichten"
     );
+  });
+
+  it("answers via fallback keywords when AI budget is exhausted", async () => {
+    mockHasAiBudgetForSource.mockResolvedValue(false);
+    mockDb([
+      { data: { title: "Neuer Radweg", link: "https://example.com/1" } },
+    ]);
+
+    const result = await answerQuestion(
+      "user",
+      "<p>@saarlandnews Gibt es Neuigkeiten zum Radweg?</p>",
+      defaultSettings
+    );
+
+    expect(mockMessagesCreate).not.toHaveBeenCalled();
+    expect(result).toContain("Neuer Radweg");
   });
 
   it("returns articles when keywords and results found", async () => {
