@@ -10,6 +10,19 @@ export type MatchThresholds = {
   followUpThreshold: number;
   uncertainLow: number;
   semanticMatchThreshold: number;
+  /**
+   * Max age (hours, from created_at) a TOOTED story may have to still accept
+   * follow-up articles. Without this cap a story stays matchable forever:
+   * every accepted follow-up bumps updated_at, which re-extends the matching
+   * window — generic-vocabulary stories turned into "blackholes" collecting
+   * dozens of unrelated updates. Undefined = no cap.
+   */
+  followUpMaxAgeHours?: number;
+  /**
+   * Max article_count a TOOTED story may have to still accept follow-ups.
+   * Hard backstop against unbounded update threads. Undefined = no cap.
+   */
+  maxArticlesPerStory?: number;
 };
 
 export type SemanticChecker = (
@@ -38,11 +51,38 @@ const MAX_AI_CANDIDATES = 3;
 // is the canonical thread parent. False positives are still guarded: AI scores
 // below semanticMatchThreshold drop the tooted candidate and we fall back to
 // the untooted definite match.
+// A tooted story may only act as a thread parent while it is fresh and its
+// thread is not already full. Untooted stories are exempt: they have no
+// thread yet, and stale untooted stories are cleaned up separately.
+export function isFollowUpEligible(
+  story: StoryRecord,
+  thresholds: MatchThresholds,
+  now: Date
+): boolean {
+  if (!story.tooted) return true;
+
+  if (
+    thresholds.maxArticlesPerStory !== undefined &&
+    story.article_count >= thresholds.maxArticlesPerStory
+  ) {
+    return false;
+  }
+
+  if (thresholds.followUpMaxAgeHours !== undefined) {
+    const ageHours =
+      (now.getTime() - new Date(story.created_at).getTime()) / (1000 * 60 * 60);
+    if (ageHours > thresholds.followUpMaxAgeHours) return false;
+  }
+
+  return true;
+}
+
 export async function chooseStoryMatch(
   articleTitle: string,
   candidates: StoryCandidate[],
   thresholds: MatchThresholds,
-  semanticCheck: SemanticChecker
+  semanticCheck: SemanticChecker,
+  now: Date = new Date()
 ): Promise<MatchResult | null> {
   if (candidates.length === 0) return null;
 
@@ -53,6 +93,7 @@ export async function chooseStoryMatch(
 
   for (const c of candidates) {
     const isTooted = c.story.tooted;
+    if (isTooted && !isFollowUpEligible(c.story, thresholds, now)) continue;
     const definiteThreshold = isTooted
       ? thresholds.followUpThreshold
       : thresholds.baseThreshold;

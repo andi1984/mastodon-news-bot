@@ -51,6 +51,15 @@ export type Settings = {
   min_freshness_hours: number;
   cw_mapping: SingleCWMapping[];
   similarity_threshold?: number;
+  story_similarity_threshold?: number;
+  story_follow_up_threshold?: number;
+  story_max_age_hours?: number;
+  /** Max age (hours) of a tooted story to still accept follow-up updates */
+  story_follow_up_max_age_hours?: number;
+  /** Max articles per story thread (hard cap on update count) */
+  max_articles_per_story?: number;
+  /** Max toots the thread-fixer may merge into one cluster per run */
+  thread_fixer_max_cluster_size?: number;
   breaking_news_min_sources?: number;
   breaking_news_time_window_hours?: number;
   breaking_news_priority_boost?: number;
