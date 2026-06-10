@@ -364,6 +364,150 @@ describe("chooseStoryMatch", () => {
     });
   });
 
+  describe("follow-up eligibility caps", () => {
+    const NOW = new Date("2026-06-10T12:00:00Z");
+    const CAPPED_THRESHOLDS: MatchThresholds = {
+      ...DEFAULT_THRESHOLDS,
+      followUpMaxAgeHours: 72,
+      maxArticlesPerStory: 8,
+    };
+
+    test("tooted story older than followUpMaxAgeHours is not matched even with definite jaccard", async () => {
+      const oldStory = makeStory({ id: "old-tooted", tooted: true });
+      oldStory.created_at = "2026-06-01T12:00:00Z"; // 216h old
+      const candidates: StoryCandidate[] = [
+        { story: oldStory, jaccardScore: 0.9 },
+      ];
+
+      const result = await chooseStoryMatch(
+        "title",
+        candidates,
+        CAPPED_THRESHOLDS,
+        noopSemantic,
+        NOW
+      );
+
+      expect(result).toBeNull();
+    });
+
+    test("tooted story within followUpMaxAgeHours still matches", async () => {
+      const freshStory = makeStory({ id: "fresh-tooted", tooted: true });
+      freshStory.created_at = "2026-06-09T12:00:00Z"; // 24h old
+      const candidates: StoryCandidate[] = [
+        { story: freshStory, jaccardScore: 0.9 },
+      ];
+
+      const result = await chooseStoryMatch(
+        "title",
+        candidates,
+        CAPPED_THRESHOLDS,
+        noopSemantic,
+        NOW
+      );
+
+      expect(result?.story.id).toBe("fresh-tooted");
+    });
+
+    test("tooted story at maxArticlesPerStory is not matched (thread is full)", async () => {
+      const fullStory = makeStory({ id: "full-tooted", tooted: true });
+      fullStory.created_at = "2026-06-09T12:00:00Z";
+      fullStory.article_count = 8;
+      const candidates: StoryCandidate[] = [
+        { story: fullStory, jaccardScore: 0.9 },
+      ];
+
+      const result = await chooseStoryMatch(
+        "title",
+        candidates,
+        CAPPED_THRESHOLDS,
+        noopSemantic,
+        NOW
+      );
+
+      expect(result).toBeNull();
+    });
+
+    test("ineligible tooted candidate is not sent to AI", async () => {
+      const oldStory = makeStory({ id: "old-tooted", tooted: true });
+      oldStory.created_at = "2026-06-01T12:00:00Z";
+      const semanticCheck: SemanticChecker = jest.fn(async () => new Map());
+      const candidates: StoryCandidate[] = [
+        { story: oldStory, jaccardScore: 0.5 }, // borderline → would go to AI
+      ];
+
+      const result = await chooseStoryMatch(
+        "title",
+        candidates,
+        CAPPED_THRESHOLDS,
+        semanticCheck,
+        NOW
+      );
+
+      expect(result).toBeNull();
+      expect(semanticCheck).not.toHaveBeenCalled();
+    });
+
+    test("untooted stories are unaffected by follow-up caps", async () => {
+      const oldUntooted = makeStory({ id: "old-untooted", tooted: false });
+      oldUntooted.created_at = "2026-06-01T12:00:00Z";
+      oldUntooted.article_count = 20;
+      const candidates: StoryCandidate[] = [
+        { story: oldUntooted, jaccardScore: 0.5 },
+      ];
+
+      const result = await chooseStoryMatch(
+        "title",
+        candidates,
+        CAPPED_THRESHOLDS,
+        noopSemantic,
+        NOW
+      );
+
+      expect(result?.story.id).toBe("old-untooted");
+    });
+
+    test("ineligible tooted is skipped but untooted definite still wins", async () => {
+      const oldTooted = makeStory({ id: "old-tooted", tooted: true });
+      oldTooted.created_at = "2026-06-01T12:00:00Z";
+      const untooted = makeStory({ id: "untooted", tooted: false });
+      untooted.created_at = "2026-06-10T00:00:00Z";
+
+      const candidates: StoryCandidate[] = [
+        { story: oldTooted, jaccardScore: 0.9 },
+        { story: untooted, jaccardScore: 0.45 },
+      ];
+
+      const result = await chooseStoryMatch(
+        "title",
+        candidates,
+        CAPPED_THRESHOLDS,
+        noopSemantic,
+        NOW
+      );
+
+      expect(result?.story.id).toBe("untooted");
+    });
+
+    test("caps are inactive when not configured (backwards compatible)", async () => {
+      const oldStory = makeStory({ id: "old-tooted", tooted: true });
+      oldStory.created_at = "2026-06-01T12:00:00Z";
+      oldStory.article_count = 40;
+      const candidates: StoryCandidate[] = [
+        { story: oldStory, jaccardScore: 0.9 },
+      ];
+
+      const result = await chooseStoryMatch(
+        "title",
+        candidates,
+        DEFAULT_THRESHOLDS,
+        noopSemantic,
+        NOW
+      );
+
+      expect(result?.story.id).toBe("old-tooted");
+    });
+  });
+
   describe("semantic check failures", () => {
     test("handles semantic check returning empty map (budget exhausted)", async () => {
       const tootedStory = makeStory({ id: "tooted", tooted: true });

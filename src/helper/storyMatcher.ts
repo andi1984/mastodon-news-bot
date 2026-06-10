@@ -60,6 +60,14 @@ const STORY_FOLLOW_UP_THRESHOLD =
   (settings as any).story_follow_up_threshold ??
   STORY_SIMILARITY_THRESHOLD + 0.15;
 
+// Follow-up caps: a tooted story only accepts new thread updates while it is
+// younger than this (measured from created_at, NOT updated_at — updated_at is
+// bumped by every accepted follow-up, which previously made busy stories
+// immortal) and while its thread has fewer than this many articles.
+const STORY_FOLLOW_UP_MAX_AGE_HOURS =
+  (settings as any).story_follow_up_max_age_hours ?? STORY_MAX_AGE_HOURS;
+const MAX_ARTICLES_PER_STORY = (settings as any).max_articles_per_story ?? 8;
+
 /**
  * Find an existing story that matches the given article, or return null.
  * Uses AI for uncertain cases when budget allows.
@@ -127,6 +135,8 @@ export async function findMatchingStory(
       followUpThreshold: STORY_FOLLOW_UP_THRESHOLD,
       uncertainLow: AI_UNCERTAIN_LOW,
       semanticMatchThreshold: SEMANTIC_MATCH_THRESHOLD,
+      followUpMaxAgeHours: STORY_FOLLOW_UP_MAX_AGE_HOURS,
+      maxArticlesPerStory: MAX_ARTICLES_PER_STORY,
     },
     semanticCheckAdapter
   );
