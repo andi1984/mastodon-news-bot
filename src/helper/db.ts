@@ -35,6 +35,9 @@ const fetchWithRetry: typeof fetch = async (input, init) => {
       // Retry on 5xx errors (server issues)
       if (response.status >= 500 && attempt < MAX_RETRIES - 1) {
         console.warn(`Supabase: ${response.status} on attempt ${attempt + 1}, retrying...`);
+        // Release the connection: undici keeps the socket blocked (and the
+        // response buffered) until the body is consumed or cancelled.
+        await response.body?.cancel().catch(() => {});
         await sleep(RETRY_DELAY_MS * Math.pow(2, attempt));
         continue;
       }
