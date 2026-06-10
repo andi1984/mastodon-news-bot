@@ -86,7 +86,7 @@ src/
 
 ### Prerequisites
 
-- Node.js 24+ (older versions leak memory under Bree's worker-thread churn; `@supabase/supabase-js` ≥2.106 also requires the native `WebSocket` of Node ≥22)
+- Node.js 24+ (older versions leak memory under Bree's worker-thread churn; `@supabase/supabase-js` ≥2.106 also requires the native `WebSocket` of Node ≥22 — see [docs/operations.md](docs/operations.md))
 - A Mastodon account with API access
 - Supabase project (free tier works)
 - Claude API key (optional, for AI features)

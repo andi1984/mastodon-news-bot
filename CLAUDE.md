@@ -5,7 +5,7 @@ related articles into "stories", and posts them as toots/threads on Mastodon.
 
 ## Tech Stack
 
-- **Runtime:** Node.js ≥24, TypeScript (ESM), `tsx` for dev (older Node leaks RSS under worker-thread churn; supabase-js ≥2.106 needs native WebSocket of Node ≥22)
+- **Runtime:** Node.js ≥24, TypeScript (ESM), `tsx` for dev — see `docs/operations.md` for why 24 is the floor (worker-churn RSS leak on older Node)
 - **Scheduler:** [Bree](https://github.com/breejs/bree) — runs jobs in worker threads
 - **Mastodon client:** [`masto`](https://www.npmjs.com/package/masto)
 - **Database:** Supabase (Postgres) via `@supabase/supabase-js`
@@ -44,9 +44,14 @@ should ship with the bot; root `scripts/` is for ad-hoc cleanup.
 
 ## Database Tables
 
-- `tooted_hashes` — hash → timestamp; prevents re-posting articles whose RSS items reappear after deletion. Retention via `tooted_hash_retention_days` in settings.
+- `news` (configurable via `db_table` in settings) — main article store; rows carry `story_id`, `tooted`, `canonical_url`.
+- `stories` — one row per story (topic cluster); holds `toot_id` for threading and `original_links` for thread-level URL dedup.
+- `tooted_hashes` — hash + canonical_url → timestamp; prevents re-posting articles whose RSS items reappear after deletion, and backs the pre-claim that closes cross-run duplicate-post races. Retention via `tooted_hash_retention_days` in settings.
 - `bot_state` — key/JSONB store for cooldowns, pinned toots, last-toot timestamps (used by the adaptive tooter).
-- `news` (configurable via `db_table` in settings) — main article/story store.
+- `ai_usage` — per-call Claude cost log; `costTracker.ts` sheds low-priority AI features (polls before matching) as the daily budget runs out.
+- `regional_cache` / `semantic_pair_cache` — persistent AI-result caches (title → region category, title-pair → similarity score) so repeated classifications don't re-bill Claude. Helpers in `aiCache.ts` degrade to no-ops if the tables/env are missing.
+
+Schema lives in `migrations/` (numbered SQL files, applied manually to Supabase).
 
 ## Cron Schedule (defined in `src/index.ts`)
 
@@ -54,7 +59,7 @@ should ship with the bot; root `scripts/` is for ad-hoc cleanup.
 - `feed-tooter` — every 20 min, all day; decides itself whether to post (breaking vs. normal vs. cooldown)
 - `cleanup` — every 6 h
 - `cleanup-duplicates` — every 31 min
-- `mention-replier` — every 5 min
+- `mention-replier` — every 10 min
 - `story-thread-fixer` — 03:00 and 15:00 (fuzzy-matches existing toots into threads)
 - `daily-digest` — 22:00; `weekly-digest` — Sunday 20:00
 - `alive` — 30 min heartbeat
@@ -79,10 +84,17 @@ should ship with the bot; root `scripts/` is for ad-hoc cleanup.
 - Use delays between API calls (2-6 seconds)
 - On HTTP 429: wait 30 minutes before retrying
 
+### Bree Worker Contract
+- Every job MUST end with `parentPort.postMessage("done")` (or `process.exit(0)` when run standalone) on **every** exit path, including early returns — Bree only terminates the worker on that message.
+- Safety net: `closeWorkerAfterMs: 300_000` in `src/index.ts` kills any worker after 5 min; worker heaps are capped via `resourceLimits`.
+- Workers are threads of the main process — their memory counts toward one RSS. Think twice before adding new high-frequency jobs; worker churn is the bot's main memory pressure (see `docs/operations.md`).
+- URL dedup is layered: in-batch `Set` → DB pre-claim (`claimArticles`) → `tooted_hashes`. On any failure after a claim, roll back with `releaseCanonicalUrls` or the URL is permanently blocked.
+
 ## Common Commands
 
 ```bash
 npm run dev          # Run bot locally (tsx)
+npm start            # Production: write .env via scripts/create-env.cjs, run dist/index.js
 npm run build        # Compile TypeScript + copy settings.json to dist/
 npm test             # Run Jest tests (ESM mode)
 npm run test:coverage
@@ -110,6 +122,6 @@ Do's:
 
 Dont's:
 
-- Never post toots about the same topic multiple times as a major toot. toot
-differnt links about the same topic as threads under the first major toot. Never
-too the same URL more than once. EVER! ONLY ONCE ALWAYS!
+- Never post toots about the same topic multiple times as a major toot. Toot
+different links about the same topic as threads under the first major toot.
+Never toot the same URL more than once. EVER! ONLY ONCE ALWAYS!
