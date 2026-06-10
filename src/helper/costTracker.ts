@@ -1,12 +1,14 @@
 import createClient from "./db.js";
 
-// Pricing for claude-haiku-4-5-20251001
-const HAIKU_INPUT_COST_PER_M = 0.8;
-const HAIKU_OUTPUT_COST_PER_M = 4.0;
+// Pricing for claude-haiku-4-5-20251001 ($1/MTok in, $5/MTok out).
+// Keep in sync with the official price list - undercounting here makes the
+// budget gate fire too late and the real Anthropic bill exceed the limit.
+const HAIKU_INPUT_COST_PER_M = 1.0;
+const HAIKU_OUTPUT_COST_PER_M = 5.0;
 
-// Hard daily limit (15 cents) - can be overridden by AI_DAILY_COST_LIMIT_USD env var.
-// Sized so the monthly bill stays under ~€4.50 even at full daily usage.
-export const DEFAULT_DAILY_LIMIT_USD = 0.15;
+// Hard daily limit (5 cents) - can be overridden by AI_DAILY_COST_LIMIT_USD env var.
+// Sized so the monthly bill stays under ~$1.50 even at full daily usage.
+export const DEFAULT_DAILY_LIMIT_USD = 0.05;
 
 // Priority levels for AI features
 export const AI_PRIORITY = {

@@ -104,7 +104,7 @@ export async function analyzeForPoll(
       messages: [{ role: "user", content: `Artikel: "${title}"` }],
     });
 
-    logAiUsage(
+    await logAiUsage(
       "poll_analysis",
       response.usage.input_tokens,
       response.usage.output_tokens

@@ -224,6 +224,77 @@ describe("scoreRegionalRelevance", () => {
     expect(mockMessagesCreate).not.toHaveBeenCalled();
   });
 
+  it("classifies titles matching local_keywords without API call", async () => {
+    const config = {
+      ...defaultConfig,
+      local_keywords: ["saarbrücken", "saarlouis"],
+    };
+
+    const articles = [
+      { title: "Brand in Saarbrücken", feedKey: "saarbruecker-zeitung" },
+      { title: "Stau bei Saarlouis", feedKey: "radio-salue" },
+    ];
+
+    const result = await scoreRegionalRelevance(articles, config);
+
+    expect(result.get(0)).toBe(1.5);
+    expect(result.get(1)).toBe(1.5);
+    expect(mockMessagesCreate).not.toHaveBeenCalled();
+  });
+
+  it("sends only non-keyword titles to the API", async () => {
+    const config = { ...defaultConfig, local_keywords: ["saarbrücken"] };
+    mockApiResponse(JSON.stringify([{ i: 1, c: "national" }]));
+
+    const articles = [
+      { title: "Brand in Saarbrücken", feedKey: "saarbruecker-zeitung" },
+      { title: "Bundestagswahl", feedKey: "tagesschau" },
+    ];
+
+    const result = await scoreRegionalRelevance(articles, config);
+
+    expect(result.get(0)).toBe(1.5); // keyword match, no AI
+    expect(result.get(1)).toBe(1.0); // AI classified
+    expect(mockMessagesCreate).toHaveBeenCalledTimes(1);
+    const call = mockMessagesCreate.mock.calls[0][0] as any;
+    expect(call.messages[0].content).not.toContain("Saarbrücken");
+  });
+
+  it("splits large batches into chunks with sized max_tokens", async () => {
+    // 30 articles -> 2 chunks (25 + 5)
+    mockMessagesCreate.mockImplementation(async (req: any) => {
+      // Echo back a classification for every index mentioned in the prompt
+      const indices = [...req.messages[0].content.matchAll(/^(\d+):/gm)].map(
+        (m: any) => Number(m[1])
+      );
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(indices.map((i: number) => ({ i, c: "national" }))),
+          },
+        ],
+        usage: { input_tokens: 200, output_tokens: 80 },
+      };
+    });
+
+    const articles = Array.from({ length: 30 }, (_, i) => ({
+      title: `Artikel ${i}`,
+      feedKey: "tagesschau",
+    }));
+
+    const result = await scoreRegionalRelevance(articles, defaultConfig);
+
+    expect(mockMessagesCreate).toHaveBeenCalledTimes(2);
+    const firstCall = mockMessagesCreate.mock.calls[0][0] as any;
+    const secondCall = mockMessagesCreate.mock.calls[1][0] as any;
+    expect(firstCall.max_tokens).toBe(25 * 16 + 64);
+    expect(secondCall.max_tokens).toBe(5 * 16 + 64);
+    for (let i = 0; i < 30; i++) {
+      expect(result.get(i)).toBe(1.0);
+    }
+  });
+
   it("fills missing indices with neutral multiplier when AI omits them (line 150)", async () => {
     // AI response is missing index 1 entirely
     mockApiResponse(JSON.stringify([{ i: 0, c: "local" }]));

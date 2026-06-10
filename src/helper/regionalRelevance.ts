@@ -27,6 +27,19 @@ const SYSTEM_PROMPT = `Klassifiziere Saarland-Nachrichten:
 
 Nur JSON-Array: [{"i":0,"c":"local"},...]`;
 
+// Max titles per API call. Output budget is sized per chunk; oversized
+// batches previously hit max_tokens, truncated the JSON, and re-billed the
+// same titles on every run because nothing reached the cache.
+const AI_CHUNK_SIZE = 25;
+// Worst-case output tokens per array entry ("{\"i\":123,\"c\":\"international\"},").
+const OUTPUT_TOKENS_PER_ENTRY = 16;
+
+function titleMatchesLocalKeyword(title: string, keywords: string[]): boolean {
+  if (keywords.length === 0) return false;
+  const lower = title.toLowerCase();
+  return keywords.some((kw) => lower.includes(kw.toLowerCase()));
+}
+
 function buildUserPrompt(articles: { index: number; title: string }[]): string {
   const lines = articles.map((a) => `${a.index}: ${a.title}`);
   return `Klassifiziere diese Artikel:\n${lines.join("\n")}`;
@@ -53,15 +66,28 @@ export async function scoreRegionalRelevance(
   }
 
   const alwaysLocal = new Set(config.always_local_feeds ?? []);
+  const localKeywords = config.local_keywords ?? [];
   const toClassify: { index: number; title: string }[] = [];
+  let keywordLocalCount = 0;
 
   for (let i = 0; i < articles.length; i++) {
     const a = articles[i];
     if (a.feedKey && alwaysLocal.has(a.feedKey)) {
       result.set(i, categoryToMultiplier("local", config));
+    } else if (titleMatchesLocalKeyword(a.title, localKeywords)) {
+      // Free programmatic classification: a Saarland place name in the title
+      // means "local" - no need to pay Claude to confirm that.
+      result.set(i, categoryToMultiplier("local", config));
+      keywordLocalCount++;
     } else {
       toClassify.push({ index: i, title: a.title });
     }
+  }
+
+  if (keywordLocalCount > 0) {
+    console.log(
+      `Regional relevance: ${keywordLocalCount} articles classified local via keyword match (no AI)`
+    );
   }
 
   if (toClassify.length === 0) {
@@ -99,81 +125,74 @@ export async function scoreRegionalRelevance(
     return result;
   }
 
-  try {
-    if (!(await hasAiBudgetForSource("regional_relevance"))) {
-      console.warn(
-        "Regional relevance: AI budget threshold reached, using neutral multipliers"
+  const counts: Record<string, number> = {
+    local: 0,
+    regional: 0,
+    national: 0,
+    international: 0,
+  };
+  const client = getAnthropicClient(apiKey);
+  const indexToTitle = new Map(stillToClassify.map((t) => [t.index, t.title]));
+
+  for (let start = 0; start < stillToClassify.length; start += AI_CHUNK_SIZE) {
+    const chunk = stillToClassify.slice(start, start + AI_CHUNK_SIZE);
+    try {
+      // Re-check between chunks so a long backlog can't blow past the limit.
+      if (!(await hasAiBudgetForSource("regional_relevance"))) {
+        console.warn(
+          "Regional relevance: AI budget threshold reached, using neutral multipliers for remaining articles"
+        );
+        break;
+      }
+
+      const response = await client.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: chunk.length * OUTPUT_TOKENS_PER_ENTRY + 64,
+        system: SYSTEM_PROMPT,
+        messages: [{ role: "user", content: buildUserPrompt(chunk) }],
+      });
+
+      await logAiUsage(
+        "regional_relevance",
+        response.usage.input_tokens,
+        response.usage.output_tokens
       );
-      for (const item of stillToClassify) {
-        result.set(item.index, 1.0);
+
+      const text =
+        response.content[0].type === "text" ? response.content[0].text : "";
+      const parsed = parseAiJson<{ i: number; c: RelevanceCategory }[]>(text);
+
+      const toCache: { title: string; category: RelevanceCategory }[] = [];
+      for (const entry of parsed) {
+        const multiplier = categoryToMultiplier(entry.c, config);
+        result.set(entry.i, multiplier);
+        if (entry.c in counts) counts[entry.c]++;
+        const title = indexToTitle.get(entry.i);
+        if (title) toCache.push({ title, category: entry.c });
       }
-      return result;
-    }
 
-    const client = getAnthropicClient(apiKey);
-    const response = await client.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 160,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: buildUserPrompt(stillToClassify) }],
-    });
-
-    logAiUsage(
-      "regional_relevance",
-      response.usage.input_tokens,
-      response.usage.output_tokens
-    );
-
-    const text =
-      response.content[0].type === "text" ? response.content[0].text : "";
-    const parsed = parseAiJson<{ i: number; c: RelevanceCategory }[]>(text);
-
-    const counts: Record<string, number> = {
-      local: 0,
-      regional: 0,
-      national: 0,
-      international: 0,
-    };
-
-    const toCache: { title: string; category: RelevanceCategory }[] = [];
-    const indexToTitle = new Map(
-      stillToClassify.map((t) => [t.index, t.title])
-    );
-    for (const entry of parsed) {
-      const multiplier = categoryToMultiplier(entry.c, config);
-      result.set(entry.i, multiplier);
-      if (entry.c in counts) counts[entry.c]++;
-      const title = indexToTitle.get(entry.i);
-      if (title) toCache.push({ title, category: entry.c });
-    }
-
-    // Persist fresh classifications so future runs hit the cache.
-    await setCachedRegionalCategories(toCache);
-
-    // Fill any missing indices with neutral multiplier
-    for (const item of stillToClassify) {
-      if (!result.has(item.index)) {
-        result.set(item.index, 1.0);
-      }
-    }
-
-    // Count always-local articles
-    const alwaysLocalCount = articles.length - toClassify.length;
-    counts.local += alwaysLocalCount;
-
-    console.log(
-      `Regional relevance scored ${articles.length} articles: ${counts.local} local, ${counts.regional} regional, ${counts.national} national, ${counts.international} international`
-    );
-  } catch (err) {
-    console.error(
-      `Regional relevance API call failed, using neutral multipliers: ${err}`
-    );
-    for (const item of stillToClassify) {
-      if (!result.has(item.index)) {
-        result.set(item.index, 1.0);
-      }
+      // Persist fresh classifications so future runs hit the cache.
+      await setCachedRegionalCategories(toCache);
+    } catch (err) {
+      console.error(
+        `Regional relevance API call failed, using neutral multipliers: ${err}`
+      );
     }
   }
+
+  // Fill any missing indices with neutral multiplier
+  for (const item of stillToClassify) {
+    if (!result.has(item.index)) {
+      result.set(item.index, 1.0);
+    }
+  }
+
+  // Count always-local and keyword-local articles
+  counts.local += articles.length - toClassify.length;
+
+  console.log(
+    `Regional relevance scored ${articles.length} articles: ${counts.local} local, ${counts.regional} regional, ${counts.national} national, ${counts.international} international`
+  );
 
   return result;
 }
