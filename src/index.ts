@@ -1,5 +1,6 @@
 import "dotenv/config";
 import path from "node:path";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import Bree from "bree";
 import { createRequire } from "node:module";
@@ -107,3 +108,36 @@ const bree = new Bree({
 });
 
 bree.start();
+
+/**
+ * Hourly memory telemetry. Railway's memory graph counts the whole container
+ * cgroup (including filesystem cache), so a climbing graph alone can't tell a
+ * process leak from cache growth. Logging both views side by side does:
+ * - rss/heapUsed climbing  -> real leak in this process
+ * - rss flat, cgroup "file" climbing -> page cache, not a leak
+ */
+function logMemoryStats() {
+  const mb = (bytes: number) => Math.round(bytes / 1024 / 1024);
+  const m = process.memoryUsage();
+  let cgroup = "";
+  try {
+    const current = Number(
+      readFileSync("/sys/fs/cgroup/memory.current", "utf8").trim()
+    );
+    const stat = readFileSync("/sys/fs/cgroup/memory.stat", "utf8");
+    const field = (key: string) =>
+      Number(stat.match(new RegExp(`^${key} (\\d+)`, "m"))?.[1] ?? 0);
+    cgroup =
+      ` cgroupCurrent=${mb(current)}MB anon=${mb(field("anon"))}MB` +
+      ` file=${mb(field("file"))}MB kernel=${mb(field("kernel"))}MB`;
+  } catch {
+    // cgroup v2 files unavailable (local dev, macOS, cgroup v1)
+  }
+  console.log(
+    `[memory] rss=${mb(m.rss)}MB heapUsed=${mb(m.heapUsed)}MB` +
+      ` external=${mb(m.external)}MB workersAlive=${bree.workers.size}${cgroup}`
+  );
+}
+
+logMemoryStats();
+setInterval(logMemoryStats, 60 * 60 * 1000);
