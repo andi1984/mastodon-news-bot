@@ -98,4 +98,9 @@ function getDateBerlin(date: string): string {
 
   if (parentPort) parentPort.postMessage("done");
   else process.exit(0);
-})();
+})().catch((err) => {
+  // Bree worker contract: "done" must be posted on every exit path.
+  console.error("[daily-digest] Fatal error:", err);
+  if (parentPort) parentPort.postMessage("done");
+  else process.exit(1);
+});

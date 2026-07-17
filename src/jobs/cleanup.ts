@@ -285,7 +285,12 @@ async function runFullCleanup(): Promise<CleanupStats> {
 
   if (parentPort) parentPort.postMessage("done");
   else process.exit(0);
-})();
+})().catch((err) => {
+  // Bree worker contract: "done" must be posted on every exit path.
+  console.error("[cleanup] Fatal error:", err);
+  if (parentPort) parentPort.postMessage("done");
+  else process.exit(1);
+});
 
 // Export for use in other modules (inline cleanup after tooting)
 export { cleanupTootedArticles, cleanupOrphanedStoryRefs, runFullCleanup };

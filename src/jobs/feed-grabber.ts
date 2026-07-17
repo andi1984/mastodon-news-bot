@@ -255,4 +255,9 @@ async function fetchFeedBatch(
 
   if (parentPort) parentPort.postMessage("done");
   else process.exit(0);
-})();
+})().catch((err) => {
+  // Bree worker contract: "done" must be posted on every exit path.
+  console.error("[feed-grabber] Fatal error:", err);
+  if (parentPort) parentPort.postMessage("done");
+  else process.exit(1);
+});

@@ -24,10 +24,14 @@ const MIN_AGE_MINUTES = 5; // Only consider toots older than 5 minutes
 const REQUEST_DELAY = 500; // Delay between API requests
 const DELETE_DELAY = 1500; // Delay between deletions
 
-// Rate limiting
+// Rate limiting. The full backoff chain must stay well below Bree's 300s
+// closeWorkerAfterMs (5s+10s+20s = 35s worst case per call) so the
+// "Max retries exceeded" path — which stops the run and posts "done" —
+// is actually reachable instead of the worker being force-killed mid-sleep.
+// The old budget (10 retries, 755s cumulative) guaranteed a force-kill.
 const INITIAL_RETRY_DELAY = 5000;
-const MAX_RETRY_DELAY = 120000;
-const MAX_RETRIES = 10;
+const MAX_RETRY_DELAY = 30000;
+const MAX_RETRIES = 3;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));

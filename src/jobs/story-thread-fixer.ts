@@ -38,11 +38,23 @@ const TIME_WINDOW_HOURS = 24; // Only group toots within 24 hours of each other
 const MAX_CLUSTERS_PER_RUN = 3; // Limit fixes per run to avoid rate limits
 const MAX_CLUSTER_SIZE = settings.thread_fixer_max_cluster_size ?? 4;
 
-// Rate limiting
+// Rate limiting. All in-worker waits must stay well below Bree's 300s
+// closeWorkerAfterMs — the previous 30-min pause guaranteed the worker was
+// force-killed mid-sleep, so its "resume" code was unreachable. On sustained
+// 429s we now stop the run cleanly; the next scheduled run (12h later, far
+// beyond Mastodon's ~5-min rate-limit window) picks up remaining clusters.
 const REQUEST_DELAY_MS = 2000; // 2 seconds between API calls
 const DELETE_DELAY_MS = 3000; // 3 seconds between deletions
-const RATE_LIMIT_PAUSE_MS = 30 * 60 * 1000; // 30 minutes on rate limit
+const RATE_LIMIT_RETRY_MS = 45 * 1000; // single bounded wait before the one 429 retry
+const RETRY_DELAY_MS = 30 * 1000; // between cluster retries (non-429 errors)
 const MAX_RETRIES = 3;
+
+/** Thrown to abort the whole run when Mastodon keeps rate-limiting us. */
+class RateLimitAbortError extends Error {
+  constructor() {
+    super("aborting run: rate limited");
+  }
+}
 
 interface TootInfo extends ClusterableToot {
   content: string;
@@ -146,12 +158,16 @@ async function fixCluster(
       return { deleted: 0, replied: 0, failed: 0 };
     }
   } catch (err: any) {
+    if (err.statusCode === 429) throw new RateLimitAbortError();
     console.error(`  Failed to verify primary: ${err.message}`);
     failed++;
     return { deleted, replied, failed };
   }
 
   for (const dup of cluster.duplicates) {
+    // Phase 1: nothing destructive has happened yet — on 429 abort the whole
+    // run; the next scheduled run re-clusters and redoes this work.
+    let replyText: string | null = null;
     try {
       // SAFETY: Re-verify this duplicate has no interactions before deleting
       console.log(`  Re-checking ${dup.id} for interactions...`);
@@ -165,30 +181,33 @@ async function fixCluster(
         continue;
       }
 
-      // Extract unique links not in primary
+      // Extract unique links not in primary; without new links the duplicate
+      // is deleted and nothing needs re-posting. Reply text uses the same
+      // prefix as feed-tooter follow-ups, so tootClustering's isUpdatePost
+      // catches both.
       const primaryLinks = new Set(cluster.primary.links);
       const newLinks = dup.links.filter((link) => !primaryLinks.has(link));
-
-      if (newLinks.length === 0) {
-        // No new links - just delete without re-posting
-        console.log(`  Deleting ${dup.id} (no new links)...`);
-        await client.v1.statuses.$select(dup.id).remove();
-        deleted++;
-        await sleep(DELETE_DELAY_MS);
-        continue;
+      if (newLinks.length > 0) {
+        replyText = `🔗 Update: ${dup.headline.slice(0, 200)}\n${newLinks.slice(0, 2).join("\n")}`;
       }
 
-      // Build reply text with headline context and new links (same prefix as
-      // feed-tooter follow-ups, so tootClustering's isUpdatePost catches both)
-      const replyText = `🔗 Update: ${dup.headline.slice(0, 200)}\n${newLinks.slice(0, 2).join("\n")}`;
-
-      // Delete the duplicate
-      console.log(`  Deleting ${dup.id}...`);
+      console.log(`  Deleting ${dup.id}${replyText === null ? " (no new links)" : ""}...`);
       await client.v1.statuses.$select(dup.id).remove();
       deleted++;
       await sleep(DELETE_DELAY_MS);
+    } catch (err: any) {
+      if (err.statusCode === 429) throw new RateLimitAbortError();
+      console.error(`  Failed to process ${dup.id}: ${err.message}`);
+      failed++;
+      continue;
+    }
 
-      // Re-post as reply
+    if (replyText === null) continue;
+
+    // Phase 2: the duplicate is already deleted — if the reply never lands,
+    // its links are lost. One bounded retry on 429 (must stay far below
+    // Bree's 300s force-kill), then give up loudly.
+    try {
       console.log(`  Creating reply to ${cluster.primary.id}...`);
       await client.v1.statuses.create({
         status: replyText,
@@ -199,21 +218,29 @@ async function fixCluster(
       replied++;
       await sleep(REQUEST_DELAY_MS);
     } catch (err: any) {
-      if (err.statusCode === 429) {
-        console.log(
-          `[story-thread-fixer] Rate limited! Waiting ${RATE_LIMIT_PAUSE_MS / 60000} minutes...`
-        );
-        await sleep(RATE_LIMIT_PAUSE_MS);
-        // Retry this one
-        try {
-          await client.v1.statuses.$select(dup.id).remove();
-          deleted++;
-        } catch {
-          failed++;
-        }
-      } else {
-        console.error(`  Failed to process ${dup.id}: ${err.message}`);
+      if (err.statusCode !== 429) {
+        console.error(`  Reply for deleted toot ${dup.id} failed (links lost): ${err.message}`);
         failed++;
+        continue;
+      }
+      console.log(
+        `[story-thread-fixer] Rate limited after deleting ${dup.id} — one retry in ${RATE_LIMIT_RETRY_MS / 1000}s...`
+      );
+      await sleep(RATE_LIMIT_RETRY_MS);
+      try {
+        await client.v1.statuses.create({
+          status: replyText,
+          inReplyToId: cluster.primary.id,
+          visibility: "public",
+          language: "de",
+        });
+        replied++;
+      } catch (retryErr: any) {
+        console.error(
+          `  Reply for deleted toot ${dup.id} failed after retry (links lost): ${retryErr.message}`
+        );
+        failed++;
+        throw new RateLimitAbortError();
       }
     }
   }
@@ -262,7 +289,9 @@ async function fixCluster(
     let totalReplied = 0;
     let totalFailed = 0;
 
-    for (let i = 0; i < clustersToFix.length; i++) {
+    let rateLimited = false;
+
+    for (let i = 0; i < clustersToFix.length && !rateLimited; i++) {
       console.log(
         `\n[story-thread-fixer] Processing cluster ${i + 1}/${clustersToFix.length}...`
       );
@@ -278,12 +307,21 @@ async function fixCluster(
           totalFailed += result.failed;
           success = true;
         } catch (err: any) {
+          if (err instanceof RateLimitAbortError) {
+            // Don't wait out a rate limit inside the worker — the next
+            // scheduled run (12h away) is far past any rate-limit window.
+            console.log(
+              "[story-thread-fixer] Rate limited — stopping this run; remaining clusters will be handled next run"
+            );
+            rateLimited = true;
+            break;
+          }
           retries++;
           console.error(
             `[story-thread-fixer] Cluster failed (retry ${retries}/${MAX_RETRIES}): ${err.message}`
           );
           if (retries < MAX_RETRIES) {
-            await sleep(RATE_LIMIT_PAUSE_MS / 6); // 5 min between retries
+            await sleep(RETRY_DELAY_MS);
           }
         }
       }
