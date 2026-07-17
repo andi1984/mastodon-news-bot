@@ -20,7 +20,10 @@ const parser = new Parser();
  * (some German feeds still serve ISO-8859-1); falls back to UTF-8, matching
  * rss-parser's own behavior.
  */
-const decodeBody = (buffer: ArrayBuffer, contentType: string | null): string => {
+const decodeBody = (
+  buffer: ArrayBuffer,
+  contentType: string | null,
+): string => {
   const charset = /charset=([^;]+)/i.exec(contentType ?? "")?.[1]?.trim();
   try {
     return new TextDecoder(charset || "utf-8").decode(buffer);
@@ -47,7 +50,7 @@ const getFeed = async (feed: string): Promise<{ items: any[] } | null> => {
 
     const xml = decodeBody(
       await response.arrayBuffer(),
-      response.headers.get("content-type")
+      response.headers.get("content-type"),
     );
     return await parser.parseString(xml);
   } catch (error: any) {

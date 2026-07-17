@@ -1,4 +1,11 @@
-import { jest, describe, test, expect, beforeEach, afterEach } from "@jest/globals";
+import {
+  jest,
+  describe,
+  test,
+  expect,
+  beforeEach,
+  afterEach,
+} from "@jest/globals";
 
 const mockParseString = jest.fn();
 
@@ -54,7 +61,8 @@ describe("getFeed", () => {
 
     await getFeed("https://example.com/feed");
 
-    const init = (globalThis.fetch as jest.Mock).mock.calls[0][1] as RequestInit;
+    const init = (globalThis.fetch as jest.Mock).mock
+      .calls[0][1] as RequestInit;
     expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 
@@ -67,7 +75,7 @@ describe("getFeed", () => {
       new Response(latin1, {
         status: 200,
         headers: { "content-type": "text/xml; charset=iso-8859-1" },
-      })
+      }),
     );
     mockParseString.mockResolvedValue({ items: [] });
 
@@ -103,14 +111,16 @@ describe("getFeed", () => {
       const result = await getFeed("https://example.com/feed");
       expect(result).toBeNull();
       expect(mockParseString).not.toHaveBeenCalled();
-    }
+    },
   );
 
   test("returns null on parse error", async () => {
     globalThis.fetch = jest
       .fn<typeof fetch>()
       .mockResolvedValue(xmlResponse("not xml"));
-    mockParseString.mockRejectedValue(new Error("Feed not recognized as RSS 1 or 2."));
+    mockParseString.mockRejectedValue(
+      new Error("Feed not recognized as RSS 1 or 2."),
+    );
 
     const result = await getFeed("https://example.com/feed");
     expect(result).toBeNull();
@@ -128,7 +138,9 @@ describe("getFeed", () => {
   });
 
   test("handles error without message property", async () => {
-    globalThis.fetch = jest.fn<typeof fetch>().mockRejectedValue("string error");
+    globalThis.fetch = jest
+      .fn<typeof fetch>()
+      .mockRejectedValue("string error");
 
     const result = await getFeed("https://example.com/feed");
     expect(result).toBeNull();
