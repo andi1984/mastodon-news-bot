@@ -31,6 +31,7 @@ describe("login", () => {
     expect(mockCreateRestAPIClient).toHaveBeenCalledWith({
       url: "https://mastodon.example",
       accessToken: "test-token",
+      timeout: 30_000,
     });
   });
 

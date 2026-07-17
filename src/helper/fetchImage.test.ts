@@ -96,25 +96,20 @@ describe("fetchImage", () => {
     expect(result!.type).toBe("image/jpeg");
   });
 
-  test("timeout callback aborts the request after 15 seconds", async () => {
-    jest.useFakeTimers();
+  test("passes a timeout signal covering the whole request", async () => {
+    // AbortSignal.timeout runs on Node-internal timers that Jest cannot
+    // fake, so assert the wiring: the signal reaches fetch, and a
+    // TimeoutError from it maps to a null result.
     let signalRef: AbortSignal | undefined;
     globalThis.fetch = jest.fn<typeof fetch>().mockImplementation((_, init) => {
       signalRef = (init as RequestInit)?.signal as AbortSignal | undefined;
-      return new Promise((_, reject) => {
-        if (signalRef) {
-          signalRef.addEventListener("abort", () =>
-            reject(new DOMException("The operation was aborted.", "AbortError"))
-          );
-        }
-      });
+      return Promise.reject(
+        new DOMException("The operation was aborted due to timeout", "TimeoutError")
+      );
     });
 
-    const resultPromise = fetchImage("https://example.com/slow.png");
-    jest.advanceTimersByTime(15001);
-    const result = await resultPromise;
+    const result = await fetchImage("https://example.com/slow.png");
     expect(result).toBeNull();
-    expect(signalRef?.aborted).toBe(true);
-    jest.useRealTimers();
+    expect(signalRef).toBeInstanceOf(AbortSignal);
   });
 });

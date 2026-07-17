@@ -4,7 +4,10 @@ import { parseAiJson } from "./parseAiJson.js";
 
 let _anthropicClient: Anthropic | null = null;
 function getAnthropicClient(apiKey: string): Anthropic {
-  if (!_anthropicClient) _anthropicClient = new Anthropic({ apiKey });
+  // SDK defaults (10 min timeout × 2 retries) can pin a worker far past
+  // Bree's 300s force-kill; callers all degrade gracefully on error.
+  if (!_anthropicClient)
+    _anthropicClient = new Anthropic({ apiKey, timeout: 60_000, maxRetries: 1 });
   return _anthropicClient;
 }
 
