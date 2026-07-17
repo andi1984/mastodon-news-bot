@@ -86,6 +86,7 @@ Schema lives in `migrations/` (numbered SQL files, applied manually to Supabase)
 
 ### Bree Worker Contract
 - Every job MUST end with `parentPort.postMessage("done")` (or `process.exit(0)` when run standalone) on **every** exit path, including early returns — Bree only terminates the worker on that message.
+- Every network await and retry/backoff budget inside a worker must be bounded **well below 300s** (the `closeWorkerAfterMs` kill window) — see the per-dependency timeout table in `docs/operations.md`. Never `sleep()` out a rate limit inside a worker; stop the run cleanly and let the next scheduled run resume.
 - Safety net: `closeWorkerAfterMs: 300_000` in `src/index.ts` kills any worker after 5 min; worker heaps are capped via `resourceLimits`.
 - Workers are threads of the main process — their memory counts toward one RSS. Think twice before adding new high-frequency jobs; worker churn is the bot's main memory pressure (see `docs/operations.md`).
 - URL dedup is layered: in-batch `Set` → DB pre-claim (`claimArticles`) → `tooted_hashes`. On any failure after a claim, roll back with `releaseCanonicalUrls` or the URL is permanently blocked.
