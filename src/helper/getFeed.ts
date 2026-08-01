@@ -4,7 +4,7 @@ import Parser from "rss-parser";
 // rss-parser's own network layer never destroys the request on timeout,
 // non-2xx, or redirect (rbren/rss-parser#238, unfixed upstream), leaving the
 // socket open and the response buffering for the rest of the worker's life.
-// Native fetch aborts the transfer for real via AbortSignal.timeout.
+// Native fetch aborts the transfer for real via an aborted signal.
 const FETCH_TIMEOUT_MS = 15000;
 
 const FETCH_HEADERS = {
@@ -34,9 +34,25 @@ const decodeBody = (
 
 const getFeed = async (feed: string): Promise<{ items: any[] } | null> => {
   console.log("Parsing feed:", feed);
+  // Own AbortController instead of AbortSignal.timeout: Node 24.16+ retains
+  // fetch buffers after AbortSignal.timeout aborts (nodejs/node#63708), and
+  // the abort reason keeps the TimeoutError name the handler below expects.
+  // One deadline for headers AND body; cleared only after the body is read.
+  const ac = new AbortController();
+  const timeoutId = setTimeout(
+    () =>
+      ac.abort(
+        new DOMException(
+          `Feed fetch timed out after ${FETCH_TIMEOUT_MS}ms`,
+          "TimeoutError",
+        ),
+      ),
+    FETCH_TIMEOUT_MS,
+  );
+  timeoutId.unref?.();
   try {
     const response = await fetch(feed, {
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      signal: ac.signal,
       headers: FETCH_HEADERS,
       redirect: "follow",
     });
@@ -65,6 +81,8 @@ const getFeed = async (feed: string): Promise<{ items: any[] } | null> => {
       console.error(`Failed to fetch feed ${feed}:`, error?.message || error);
     }
     return null;
+  } finally {
+    clearTimeout(timeoutId);
   }
 };
 

@@ -6,12 +6,27 @@
 const FETCH_TIMEOUT_MS = 15000;
 
 const fetchImage = async (url: string): Promise<Blob | null> => {
+  // One deadline for headers AND body: a slow-drip server must not be able
+  // to hold the worker open past the timeout (undici's own bodyTimeout is
+  // idle-based and resets on every chunk). Own AbortController instead of
+  // AbortSignal.timeout: Node 24.16+ retains fetch buffers after
+  // AbortSignal.timeout aborts (nodejs/node#63708); the abort reason keeps
+  // the TimeoutError name the catch below expects.
+  const ac = new AbortController();
+  const timeoutId = setTimeout(
+    () =>
+      ac.abort(
+        new DOMException(
+          `Image fetch timed out after ${FETCH_TIMEOUT_MS}ms`,
+          "TimeoutError",
+        ),
+      ),
+    FETCH_TIMEOUT_MS,
+  );
+  timeoutId.unref?.();
   try {
-    // One deadline for headers AND body: a slow-drip server must not be able
-    // to hold the worker open past the timeout (undici's own bodyTimeout is
-    // idle-based and resets on every chunk).
     const response = await fetch(url, {
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      signal: ac.signal,
       headers: {
         "User-Agent": "MastodonNewsBot/2.0",
       },
@@ -41,6 +56,8 @@ const fetchImage = async (url: string): Promise<Blob | null> => {
       console.log(`Image fetch error for ${url}: ${e}`);
     }
     return null;
+  } finally {
+    clearTimeout(timeoutId);
   }
 };
 
