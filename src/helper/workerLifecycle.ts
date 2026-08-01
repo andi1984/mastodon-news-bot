@@ -118,8 +118,15 @@ export function startWatchdog(jobName: string, ms: number = WATCHDOG_MS): void {
 export function _resetForTesting(): void {
   donePosted = false;
 }
+/**
+ * "standalone" forces the no-port (process.exit) path regardless of the
+ * environment; null restores the real parentPort. An explicit sentinel so
+ * tests don't silently change meaning if the runner ever executes them
+ * inside a worker thread.
+ */
 export function _setPortForTesting(
-  fake: { postMessage(value: unknown): void } | null
+  fake: { postMessage(value: unknown): void } | "standalone" | null
 ): void {
-  port = fake ?? parentPort;
+  if (fake === "standalone") port = null;
+  else port = fake ?? parentPort;
 }

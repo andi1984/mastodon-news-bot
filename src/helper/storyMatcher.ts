@@ -400,6 +400,10 @@ export async function processNewArticles(
           console.log(
             `  → Created new story: "${article.title.slice(0, 50)}..."`
           );
+        } else {
+          // Story creation failed; the article keeps story_id null and is
+          // retried by the next run's leftover re-match.
+          leftUnassigned++;
         }
       }
     }

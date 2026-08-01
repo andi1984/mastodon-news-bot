@@ -14,7 +14,7 @@ describe("workerLifecycle", () => {
 
   beforeEach(() => {
     _resetForTesting();
-    _setPortForTesting(null);
+    _setPortForTesting("standalone");
     exitSpy = jest
       .spyOn(process, "exit")
       .mockImplementation((() => undefined) as never);
@@ -67,16 +67,34 @@ describe("workerLifecycle", () => {
     });
 
     test("postDone flushes stdout and stderr before signalling", async () => {
-      const stdoutWrite = jest.spyOn(process.stdout, "write");
-      const stderrWrite = jest.spyOn(process.stderr, "write");
+      // Record how many done signals had been posted at flush time — the
+      // flush must strictly precede the postMessage("done").
+      const postedAtFlushTime: number[] = [];
+      const recordingImpl = ((
+        _chunk: unknown,
+        encodingOrCb?: unknown,
+        cb?: unknown
+      ) => {
+        postedAtFlushTime.push(posted.length);
+        const callback = typeof encodingOrCb === "function" ? encodingOrCb : cb;
+        if (typeof callback === "function") (callback as () => void)();
+        return true;
+      }) as typeof process.stdout.write;
+      const stdoutWrite = jest
+        .spyOn(process.stdout, "write")
+        .mockImplementation(recordingImpl);
+      const stderrWrite = jest
+        .spyOn(process.stderr, "write")
+        .mockImplementation(recordingImpl);
 
       await postDone();
 
-      expect(stdoutWrite).toHaveBeenCalled();
-      expect(stderrWrite).toHaveBeenCalled();
-
       stdoutWrite.mockRestore();
       stderrWrite.mockRestore();
+
+      expect(postedAtFlushTime.length).toBeGreaterThanOrEqual(2);
+      expect(postedAtFlushTime.every((n) => n === 0)).toBe(true);
+      expect(posted).toEqual(["done"]);
     });
 
     test("watchdog warns but never posts done — the job decides completion", async () => {

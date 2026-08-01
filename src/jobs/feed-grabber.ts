@@ -116,14 +116,22 @@ const toArticleForMatching = (row: {
  * storyMatcher deadlines). They are held back from posting by feed-tooter's
  * orphan grace period and must be re-matched here, or a standalone toot
  * could duplicate an existing story's topic.
+ *
+ * Oldest first, and only rows created before this run started: leftovers
+ * closest to grace expiry must drain first, and rows this run just inserted
+ * would otherwise crowd all 50 slots out of the query during a burst — the
+ * exact situation that produces leftovers in the first place.
  */
-async function fetchUnassignedLeftovers(): Promise<ArticleForMatching[]> {
+async function fetchUnassignedLeftovers(
+  jobStartedAt: number
+): Promise<ArticleForMatching[]> {
   const { data: unassigned, error } = await supabase
     .from(settings.db_table)
     .select("id, data, pub_date")
     .is("story_id", null)
     .eq("tooted", false)
-    .order("created_at", { ascending: false })
+    .lt("created_at", new Date(jobStartedAt).toISOString())
+    .order("created_at", { ascending: true })
     .limit(50);
 
   if (error) {
@@ -156,7 +164,7 @@ async function fetchUnassignedLeftovers(): Promise<ArticleForMatching[]> {
   if (allCandidates.length === 0) {
     console.log("No candidates from any feed");
     await processNewArticles(
-      await fetchUnassignedLeftovers(),
+      await fetchUnassignedLeftovers(jobStartedAt),
       settings.db_table,
       matchDeadlines
     );
@@ -252,7 +260,7 @@ async function fetchUnassignedLeftovers(): Promise<ArticleForMatching[]> {
   if (newCandidates.length === 0) {
     console.log("No new items to insert");
     await processNewArticles(
-      await fetchUnassignedLeftovers(),
+      await fetchUnassignedLeftovers(jobStartedAt),
       settings.db_table,
       matchDeadlines
     );
@@ -279,6 +287,13 @@ async function fetchUnassignedLeftovers(): Promise<ArticleForMatching[]> {
 
   if (insertError) {
     console.error(`Insert error: ${insertError.message}`);
+    // Still re-match leftovers: at night cadence (30 min) this run may be
+    // the only one before their orphan grace period expires.
+    await processNewArticles(
+      await fetchUnassignedLeftovers(jobStartedAt),
+      settings.db_table,
+      matchDeadlines
+    );
     await postDone();
     return;
   }
@@ -292,7 +307,7 @@ async function fetchUnassignedLeftovers(): Promise<ArticleForMatching[]> {
     toArticleForMatching
   );
   const insertedIds = new Set(articlesForMatching.map((a) => a.id));
-  for (const leftover of await fetchUnassignedLeftovers()) {
+  for (const leftover of await fetchUnassignedLeftovers(jobStartedAt)) {
     if (!insertedIds.has(leftover.id)) {
       articlesForMatching.push(leftover);
     }
