@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { parentPort } from "node:worker_threads";
+import { postDone, startWatchdog } from "../helper/workerLifecycle.js";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const settings = require("../data/settings.json");
@@ -84,49 +84,65 @@ async function cleanupUntootedStories(): Promise<number> {
 }
 
 async function cleanupOrphanedStoryRefs(): Promise<number> {
-  // Find articles with story_id that no longer exist in stories table
+  // Find articles with story_id that no longer exist in stories table.
+  // Capped: this table is unbounded and the whole result set is pulled into
+  // worker memory; leftovers are picked up by the next run (every 6h).
   const { data: articlesWithStories, error: fetchError } = await supabase
     .from(settings.db_table)
     .select("id, story_id")
-    .not("story_id", "is", null);
+    .not("story_id", "is", null)
+    .limit(5000);
 
   if (fetchError || !articlesWithStories || articlesWithStories.length === 0) {
     return 0;
   }
 
-  // Get all existing story IDs
+  // Get all existing story IDs (chunked: thousands of ids in one .in()
+  // overflows the PostgREST GET URL)
   const storyIds = [...new Set(articlesWithStories.map((a: any) => a.story_id))];
-  const { data: existingStories, error: storyError } = await supabase
-    .from("stories")
-    .select("id")
-    .in("id", storyIds);
+  const existingStoryIdSet = new Set<string>();
+  const CHUNK = 500;
+  for (let i = 0; i < storyIds.length; i += CHUNK) {
+    const { data: existingStories, error: storyError } = await supabase
+      .from("stories")
+      .select("id")
+      .in("id", storyIds.slice(i, i + CHUNK));
 
-  if (storyError) {
-    console.error(`Cleanup orphan refs: ${storyError.message}`);
-    return 0;
+    if (storyError) {
+      console.error(`Cleanup orphan refs: ${storyError.message}`);
+      return 0;
+    }
+    for (const s of existingStories ?? []) existingStoryIdSet.add((s as any).id);
   }
 
-  const existingStoryIds = new Set((existingStories ?? []).map((s: any) => s.id));
   const orphanedArticleIds = articlesWithStories
-    .filter((a: any) => !existingStoryIds.has(a.story_id))
+    .filter((a: any) => !existingStoryIdSet.has(a.story_id))
     .map((a: any) => a.id);
 
   if (orphanedArticleIds.length === 0) {
     return 0;
   }
 
-  // Clear orphaned story_id references
-  const { error: updateError } = await supabase
-    .from(settings.db_table)
-    .update({ story_id: null })
-    .in("id", orphanedArticleIds);
+  // Clear orphaned story_id references — chunked like the reads above:
+  // PostgREST puts .in() filters in the URL for PATCH too, and a mass-orphan
+  // event (up to the 5000-row scan cap) would otherwise fail every run and
+  // make zero progress.
+  let cleared = 0;
+  for (let i = 0; i < orphanedArticleIds.length; i += CHUNK) {
+    const chunk = orphanedArticleIds.slice(i, i + CHUNK);
+    const { error: updateError } = await supabase
+      .from(settings.db_table)
+      .update({ story_id: null })
+      .in("id", chunk);
 
-  if (updateError) {
-    console.error(`Cleanup orphan refs update: ${updateError.message}`);
-    return 0;
+    if (updateError) {
+      console.error(`Cleanup orphan refs update: ${updateError.message}`);
+      return cleared;
+    }
+    cleared += chunk.length;
   }
 
-  return orphanedArticleIds.length;
+  return cleared;
 }
 
 async function cleanupAiUsage(): Promise<number> {
@@ -169,6 +185,10 @@ async function cleanupTootedHashes(): Promise<number> {
   return data?.length ?? 0;
 }
 
+// Each unpin is up to two Mastodon/DB round trips; pins are rare, so a low
+// cap bounds the loop without ever biting in practice (next run: 6h).
+const UNPIN_CAP = 10;
+
 async function unpinExpiredToots(): Promise<number> {
   const expiredTootIds = await getExpiredPins();
 
@@ -176,12 +196,18 @@ async function unpinExpiredToots(): Promise<number> {
     return 0;
   }
 
+  if (expiredTootIds.length > UNPIN_CAP) {
+    console.warn(
+      `Unpin: capping at ${UNPIN_CAP} of ${expiredTootIds.length} expired pins this run`
+    );
+  }
+
   let unpinned = 0;
 
   try {
     const mastoClient = await getInstance();
 
-    for (const tootId of expiredTootIds) {
+    for (const tootId of expiredTootIds.slice(0, UNPIN_CAP)) {
       try {
         await mastoClient.v1.statuses.$select(tootId).unpin();
         await removePinRecord(tootId);
@@ -201,12 +227,19 @@ async function unpinExpiredToots(): Promise<number> {
   return unpinned;
 }
 
+// pruneStoryTokens bounds: the select pulls full token arrays into worker
+// memory and every oversized story costs one sequential UPDATE round trip.
+// Leftovers are picked up by the next run (every 6h).
+const PRUNE_SELECT_LIMIT = 1000;
+const PRUNE_UPDATE_CAP = 200;
+
 async function pruneStoryTokens(): Promise<number> {
   // Find stories with oversized token arrays
   const { data: largeStories, error: fetchError } = await supabase
     .from("stories")
     .select("id, tokens")
-    .not("tokens", "is", null);
+    .not("tokens", "is", null)
+    .limit(PRUNE_SELECT_LIMIT);
 
   if (fetchError || !largeStories) {
     return 0;
@@ -215,6 +248,12 @@ async function pruneStoryTokens(): Promise<number> {
   let pruned = 0;
   for (const story of largeStories as { id: string; tokens: string[] }[]) {
     if (story.tokens && story.tokens.length > MAX_STORY_TOKENS) {
+      if (pruned >= PRUNE_UPDATE_CAP) {
+        console.warn(
+          `Prune story tokens: update cap (${PRUNE_UPDATE_CAP}) reached — remaining oversized stories will be pruned next run`
+        );
+        break;
+      }
       // Keep most common/important tokens (first N added are usually from title)
       const prunedTokens = story.tokens.slice(0, MAX_STORY_TOKENS);
 
@@ -273,6 +312,7 @@ async function runFullCleanup(): Promise<CleanupStats> {
 }
 
 (async () => {
+  startWatchdog("cleanup");
   const stats = await runFullCleanup();
 
   const total = Object.values(stats).reduce((a, b) => a + b, 0);
@@ -283,13 +323,11 @@ async function runFullCleanup(): Promise<CleanupStats> {
   console.log(`  Maintenance: ${stats.orphanedStoryRefs} orphan refs, ${stats.aiUsageRows} AI logs, ${stats.tootedHashes} old hashes, ${stats.prunedStoryTokens} token arrays pruned`);
   console.log(`  Bot state: ${stats.unpinnedToots} unpinned, ${stats.expiredBotState} expired state`);
 
-  if (parentPort) parentPort.postMessage("done");
-  else process.exit(0);
-})().catch((err) => {
+  await postDone();
+})().catch(async (err) => {
   // Bree worker contract: "done" must be posted on every exit path.
   console.error("[cleanup] Fatal error:", err);
-  if (parentPort) parentPort.postMessage("done");
-  else process.exit(1);
+  await postDone(1);
 });
 
 // Export for use in other modules (inline cleanup after tooting)

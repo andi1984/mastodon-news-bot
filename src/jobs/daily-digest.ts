@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { parentPort } from "node:worker_threads";
+import { postDone, startWatchdog } from "../helper/workerLifecycle.js";
 import getInstance from "../helper/login.js";
 import {
   extractTitleFromStatus,
@@ -17,7 +17,35 @@ function getDateBerlin(date: string): string {
   return new Date(date).toLocaleDateString("en-CA", { timeZone: "Europe/Berlin" });
 }
 
+// Bounds for one run: pagination and per-status context fetches are Mastodon
+// round trips (up to 30s each); unbounded they can push the worker past
+// Bree's 300s force-kill. Only the raw-engagement top candidates get the
+// expensive context fetch — the digest needs 5 winners, not exact scores.
+// The count caps alone can't bound time (21 requests × 30s worst case), so
+// gathering also stops at GATHER_BUDGET_MS and the digest posts with
+// whatever was collected — a partial digest beats a killed worker.
+const MAX_STATUS_PAGES = 5;
+const MAX_CONTEXT_FETCHES = 15;
+const CONTEXT_FETCH_DELAY_MS = 1000;
+const GATHER_BUDGET_MS = 150_000;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Pre-rank signal from the status object itself. Deliberately excludes
+ * repliesCount: the thread-fixer posts the bot's own replies under primaries,
+ * so reply counts are self-inflated — favs and boosts can only come from
+ * other accounts. The context fetch below still counts external replies for
+ * the final score.
+ */
+const rawEngagement = (s: mastodon.v1.Status): number =>
+  (s.reblogsCount ?? 0) + (s.favouritesCount ?? 0);
+
 (async () => {
+  startWatchdog("daily-digest");
+  const startedAt = Date.now();
+  const gatherBudgetLeft = () => Date.now() - startedAt < GATHER_BUDGET_MS;
+
   const mastoClient = await getInstance();
   const me = await mastoClient.v1.accounts.verifyCredentials();
   console.log(`[daily-digest] Logged in as @${me.acct} (id: ${me.id})`);
@@ -26,6 +54,7 @@ function getDateBerlin(date: string): string {
   const todayStatuses: mastodon.v1.Status[] = [];
 
   // Paginate through own statuses, collecting today's original posts
+  let pages = 0;
   for await (const statuses of mastoClient.v1.accounts
     .$select(me.id)
     .statuses.list({ limit: 40, excludeReplies: true, excludeReblogs: true })) {
@@ -40,21 +69,46 @@ function getDateBerlin(date: string): string {
       }
     }
     if (hitYesterday) break;
+    if (++pages >= MAX_STATUS_PAGES || !gatherBudgetLeft()) {
+      console.warn(
+        `[daily-digest] Gather bound hit (${pages} pages, ${Math.round((Date.now() - startedAt) / 1000)}s) with ${todayStatuses.length} statuses — proceeding with what we have`
+      );
+      break;
+    }
   }
 
   console.log(`[daily-digest] Found ${todayStatuses.length} statuses from today (${today})`);
 
   if (todayStatuses.length === 0) {
     console.log("[daily-digest] No statuses today, skipping digest.");
-    if (parentPort) parentPort.postMessage("done");
-    else process.exit(0);
+    await postDone();
     return;
   }
 
-  // Score by engagement, excluding bot's own replies (Update toots)
+  // Score by engagement, excluding bot's own replies (Update toots).
+  // Pre-rank by the counters already on the status and only context-fetch
+  // the top candidates; the context call exists solely to subtract the
+  // bot's own thread replies from the reply count.
+  const candidates = [...todayStatuses]
+    .sort((a, b) => rawEngagement(b) - rawEngagement(a))
+    .slice(0, MAX_CONTEXT_FETCHES);
+  if (todayStatuses.length > candidates.length) {
+    console.log(
+      `[daily-digest] Context-fetching top ${candidates.length} of ${todayStatuses.length} statuses (raw-engagement pre-rank)`
+    );
+  }
+
   const scored: { status: mastodon.v1.Status; activity: number }[] = [];
 
-  for (const status of todayStatuses) {
+  for (const [i, status] of candidates.entries()) {
+    if (!gatherBudgetLeft()) {
+      console.warn(
+        `[daily-digest] Gather budget exhausted after ${scored.length}/${candidates.length} context fetches — scoring what we have`
+      );
+      break;
+    }
+    if (i > 0) await sleep(CONTEXT_FETCH_DELAY_MS);
+
     // Fetch context to get replies and filter out bot's own
     const context = await mastoClient.v1.statuses.$select(status.id).context.fetch();
     const engagement = calculateEngagement(status, context.descendants, me.id);
@@ -74,8 +128,7 @@ function getDateBerlin(date: string): string {
 
   if (topScored.length === 0) {
     console.log("[daily-digest] No statuses to include in digest, skipping.");
-    if (parentPort) parentPort.postMessage("done");
-    else process.exit(0);
+    await postDone();
     return;
   }
 
@@ -96,11 +149,9 @@ function getDateBerlin(date: string): string {
 
   console.log("[daily-digest] Digest posted successfully.");
 
-  if (parentPort) parentPort.postMessage("done");
-  else process.exit(0);
-})().catch((err) => {
+  await postDone();
+})().catch(async (err) => {
   // Bree worker contract: "done" must be posted on every exit path.
   console.error("[daily-digest] Fatal error:", err);
-  if (parentPort) parentPort.postMessage("done");
-  else process.exit(1);
+  await postDone(1);
 });
