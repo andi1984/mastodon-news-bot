@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { parentPort } from "node:worker_threads";
+import { postDone, startWatchdog } from "../helper/workerLifecycle.js";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const settings = require("../data/settings.json");
@@ -98,7 +98,58 @@ async function fetchFeedBatch(
   return results.flat();
 }
 
+const toArticleForMatching = (row: {
+  id: string;
+  data: any;
+  pub_date: string;
+}): ArticleForMatching => ({
+  id: row.id,
+  title: row.data.title || "",
+  contentSnippet: row.data.contentSnippet,
+  pubDate: row.pub_date,
+  feedKey: row.data._feedKey,
+  link: row.data.link,
+});
+
+/**
+ * Recent articles a previous budget-clipped run left without a story (see
+ * storyMatcher deadlines). They are held back from posting by feed-tooter's
+ * orphan grace period and must be re-matched here, or a standalone toot
+ * could duplicate an existing story's topic.
+ *
+ * Oldest first, and only rows created before this run started: leftovers
+ * closest to grace expiry must drain first, and rows this run just inserted
+ * would otherwise crowd all 50 slots out of the query during a burst — the
+ * exact situation that produces leftovers in the first place.
+ */
+async function fetchUnassignedLeftovers(
+  jobStartedAt: number
+): Promise<ArticleForMatching[]> {
+  const { data: unassigned, error } = await supabase
+    .from(settings.db_table)
+    .select("id, data, pub_date")
+    .is("story_id", null)
+    .eq("tooted", false)
+    .lt("created_at", new Date(jobStartedAt).toISOString())
+    .order("created_at", { ascending: true })
+    .limit(50);
+
+  if (error) {
+    console.error(`Unassigned-leftover fetch error: ${error.message}`);
+    return [];
+  }
+  return (unassigned ?? []).map(toArticleForMatching);
+}
+
 (async () => {
+  startWatchdog("feed-grabber");
+  const jobStartedAt = Date.now();
+  // Deadlines anchored at JOB start: the fetch/dedup phases below consume
+  // part of the 300s closeWorkerAfterMs window before matching starts.
+  const matchDeadlines = {
+    matchDeadlineAt: jobStartedAt + 120_000,
+    totalDeadlineAt: jobStartedAt + 180_000,
+  };
   const feedEntries = Object.entries(settings.feeds) as [string, string][];
   console.log(`Processing ${feedEntries.length} feeds...`);
 
@@ -112,8 +163,12 @@ async function fetchFeedBatch(
 
   if (allCandidates.length === 0) {
     console.log("No candidates from any feed");
-    if (parentPort) parentPort.postMessage("done");
-    else process.exit(0);
+    await processNewArticles(
+      await fetchUnassignedLeftovers(jobStartedAt),
+      settings.db_table,
+      matchDeadlines
+    );
+    await postDone();
     return;
   }
 
@@ -204,8 +259,12 @@ async function fetchFeedBatch(
 
   if (newCandidates.length === 0) {
     console.log("No new items to insert");
-    if (parentPort) parentPort.postMessage("done");
-    else process.exit(0);
+    await processNewArticles(
+      await fetchUnassignedLeftovers(jobStartedAt),
+      settings.db_table,
+      matchDeadlines
+    );
+    await postDone();
     return;
   }
 
@@ -228,36 +287,45 @@ async function fetchFeedBatch(
 
   if (insertError) {
     console.error(`Insert error: ${insertError.message}`);
-    if (parentPort) parentPort.postMessage("done");
-    else process.exit(0);
+    // Still re-match leftovers: at night cadence (30 min) this run may be
+    // the only one before their orphan grace period expires.
+    await processNewArticles(
+      await fetchUnassignedLeftovers(jobStartedAt),
+      settings.db_table,
+      matchDeadlines
+    );
+    await postDone();
     return;
   }
 
   console.log(`Inserted ${inserted?.length ?? 0} new articles`);
 
-  // Phase 4: Process ALL newly inserted articles for story assignment in a single batch
-  // This ensures cross-feed story matching works correctly
-  if (inserted && inserted.length > 0) {
-    const articlesForMatching: ArticleForMatching[] = inserted.map(
-      (row: { id: string; data: any; pub_date: string }) => ({
-        id: row.id,
-        title: row.data.title || "",
-        contentSnippet: row.data.contentSnippet,
-        pubDate: row.pub_date,
-        feedKey: row.data._feedKey,
-        link: row.data.link,
-      })
+  // Phase 4: Process ALL newly inserted articles for story assignment in a
+  // single batch (plus leftovers from budget-clipped previous runs). A single
+  // batch ensures cross-feed story matching works correctly.
+  const articlesForMatching: ArticleForMatching[] = (inserted ?? []).map(
+    toArticleForMatching
+  );
+  const insertedIds = new Set(articlesForMatching.map((a) => a.id));
+  for (const leftover of await fetchUnassignedLeftovers(jobStartedAt)) {
+    if (!insertedIds.has(leftover.id)) {
+      articlesForMatching.push(leftover);
+    }
+  }
+
+  if (articlesForMatching.length > 0) {
+    await processNewArticles(
+      articlesForMatching,
+      settings.db_table,
+      matchDeadlines
     );
-    await processNewArticles(articlesForMatching, settings.db_table);
   }
 
   console.log("Feed grabber complete");
 
-  if (parentPort) parentPort.postMessage("done");
-  else process.exit(0);
-})().catch((err) => {
+  await postDone();
+})().catch(async (err) => {
   // Bree worker contract: "done" must be posted on every exit path.
   console.error("[feed-grabber] Fatal error:", err);
-  if (parentPort) parentPort.postMessage("done");
-  else process.exit(1);
+  await postDone(1);
 });

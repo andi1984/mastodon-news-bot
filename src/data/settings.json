@@ -108,6 +108,17 @@
   "max_articles_per_story": 8,
   "thread_fixer_max_cluster_size": 4,
   "story_threading_enabled": true,
+  "jobs_enabled": {
+    "feed-grabber": true,
+    "feed-tooter": true,
+    "alive": true,
+    "cleanup": true,
+    "cleanup-duplicates": true,
+    "mention-replier": true,
+    "story-thread-fixer": true,
+    "daily-digest": true,
+    "weekly-digest": true
+  },
   "story_retention_days": 3,
   "untooted_story_retention_days": 1,
   "ai_usage_retention_days": 14,

@@ -18,19 +18,22 @@ const fetchWithRetry: typeof fetch = async (input, init) => {
   let lastError: Error | null = null;
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    // Use AbortController + clearTimeout so the timer is released as soon as
-    // the request completes, instead of holding a reference for the full 30s.
+    // One deadline for headers AND body: fetch() resolves as soon as headers
+    // arrive, but postgrest reads the body (res.json()) after we return, and
+    // a response that stalls mid-body must still hit the 30s deadline — an
+    // unbounded body read pins the worker until Bree's 300s force-kill.
+    // Aborting an already-consumed response is a no-op, and the timer is
+    // unref'd so it can't hold the worker's event loop open by itself.
     const ownSignal = !init?.signal;
     const ac = ownSignal ? new AbortController() : null;
     const timeoutId = ac ? setTimeout(() => ac.abort(), 30000) : null;
+    timeoutId?.unref?.();
 
     try {
       const response = await fetch(input, {
         ...init,
         signal: ac ? ac.signal : init!.signal,
       });
-
-      if (timeoutId !== null) clearTimeout(timeoutId);
 
       // Retry on 5xx errors (server issues)
       if (response.status >= 500 && attempt < MAX_RETRIES - 1) {
@@ -44,6 +47,8 @@ const fetchWithRetry: typeof fetch = async (input, init) => {
 
       return response;
     } catch (err) {
+      // The request is over; release this attempt's timer early. The success
+      // path deliberately leaves it armed to cover the caller's body read.
       if (timeoutId !== null) clearTimeout(timeoutId);
       lastError = err as Error;
 

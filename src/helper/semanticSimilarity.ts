@@ -11,8 +11,12 @@ let _anthropicClient: Anthropic | null = null;
 function getAnthropicClient(apiKey: string): Anthropic {
   // SDK defaults (10 min timeout × 2 retries) can pin a worker far past
   // Bree's 300s force-kill; callers all degrade gracefully on error.
+  // 30s (not the 60s the content helpers use): feed-grabber may run up to
+  // two semantic checks per article inside its matching loop, so this
+  // timeout multiplies — 30s × 2 attempts × 2 checks caps one article's AI
+  // wait at 120s instead of 240s. The scoring prompt is tiny; 30s is ample.
   if (!_anthropicClient)
-    _anthropicClient = new Anthropic({ apiKey, timeout: 60_000, maxRetries: 1 });
+    _anthropicClient = new Anthropic({ apiKey, timeout: 30_000, maxRetries: 1 });
   return _anthropicClient;
 }
 

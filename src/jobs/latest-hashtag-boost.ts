@@ -1,4 +1,4 @@
-import { parentPort } from "node:worker_threads";
+import { postDone, startWatchdog } from "../helper/workerLifecycle.js";
 import hashtagBoost from "../helper/hashtagBoost.js";
 import { asyncForEach } from "../helper/async.js";
 
@@ -7,8 +7,8 @@ const require = createRequire(import.meta.url);
 const settings = require("../data/settings.json");
 
 (async () => {
+  startWatchdog("latest-hashtag-boost");
   console.log("Starting latest hashtag boost worker");
-  console.log("foo");
 
   await asyncForEach(settings.hashtags, async (hashtag: string) => {
     await hashtagBoost(hashtag);
@@ -16,6 +16,9 @@ const settings = require("../data/settings.json");
   });
 
   // signal to parent that the job is done
-  if (parentPort) parentPort.postMessage("done");
-  else process.exit(0);
-})();
+  await postDone();
+})().catch(async (err) => {
+  // Bree worker contract: "done" must be posted on every exit path.
+  console.error("[latest-hashtag-boost] Fatal error:", err);
+  await postDone(1);
+});
