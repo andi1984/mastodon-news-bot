@@ -278,16 +278,49 @@ export async function assignStoryToArticle(
   }
 }
 
+// Time budgets for processNewArticles. The matching loop is the only
+// uncapped work loop in the highest-frequency job (feed-grabber): per article
+// it costs ~5 DB round trips plus up to two semantic AI checks, so a burst of
+// articles against a slow dependency can push the worker past Bree's 300s
+// force-kill. Callers should pass absolute deadlines anchored at JOB start
+// (feed-grabber can spend minutes in its fetch/dedup phases first); the
+// defaults below only bound standalone callers.
+//
+// Degradation is duplicate-safe by design: after the match deadline,
+// articles are only compared against stories created in this same batch —
+// creating new stories without checking existing ones could produce a second
+// story (and later a second major toot) for a topic that already has one, so
+// unmatched articles stay unassigned instead. The next feed-grabber run
+// re-matches them, and feed-tooter's orphan grace period keeps them from
+// being posted standalone in the meantime.
+const MATCH_BUDGET_MS = 150_000;
+const TOTAL_BUDGET_MS = 210_000;
+
+export interface ProcessDeadlines {
+  /** Epoch ms after which expensive DB/AI matching stops. */
+  matchDeadlineAt?: number;
+  /** Epoch ms after which the loop stops entirely. */
+  totalDeadlineAt?: number;
+}
+
 /**
  * Process a batch of newly inserted articles - match to existing stories or create new ones.
  */
 export async function processNewArticles(
   articles: ArticleForMatching[],
-  dbTable: string
+  dbTable: string,
+  deadlines?: ProcessDeadlines
 ): Promise<void> {
   if (articles.length === 0) return;
 
   console.log(`Processing ${articles.length} articles for story assignment...`);
+
+  const now = Date.now();
+  const matchDeadlineAt = deadlines?.matchDeadlineAt ?? now + MATCH_BUDGET_MS;
+  const totalDeadlineAt = deadlines?.totalDeadlineAt ?? now + TOTAL_BUDGET_MS;
+  let matchBudgetExhausted = false;
+  let processed = 0;
+  let leftUnassigned = 0;
 
   // Cache of batch-created stories to avoid repeated DB queries
   // Maps story_id -> tokens (as Set)
@@ -295,7 +328,24 @@ export async function processNewArticles(
   let newStoriesCreated = 0;
 
   for (const article of articles) {
-    const existingStory = await findMatchingStory(article, dbTable);
+    if (Date.now() > totalDeadlineAt) {
+      leftUnassigned += articles.length - processed;
+      console.warn(
+        `[storyMatcher] total deadline passed after ${processed}/${articles.length} articles — stopping`
+      );
+      break;
+    }
+    if (!matchBudgetExhausted && Date.now() > matchDeadlineAt) {
+      matchBudgetExhausted = true;
+      console.warn(
+        `[storyMatcher] match deadline passed after ${processed}/${articles.length} articles — batch-cache matching only for the rest`
+      );
+    }
+    processed++;
+
+    const existingStory = matchBudgetExhausted
+      ? null
+      : await findMatchingStory(article, dbTable);
 
     if (existingStory) {
       // Add to existing story
@@ -334,6 +384,11 @@ export async function processNewArticles(
         console.log(
           `  → Added to batch story (score=${bestBatchScore.toFixed(3)}): "${article.title.slice(0, 50)}..."`
         );
+      } else if (matchBudgetExhausted) {
+        // Creating a story here without having checked existing stories
+        // risks a duplicate story for a topic that already has one — leave
+        // the article unassigned; the next grabber run re-matches it.
+        leftUnassigned++;
       } else {
         // Create new story
         const newStoryId = await createStory(article);
@@ -350,8 +405,13 @@ export async function processNewArticles(
     }
   }
 
+  if (leftUnassigned > 0) {
+    console.warn(
+      `[storyMatcher] ${leftUnassigned} article(s) left unassigned by the deadline — the next feed-grabber run re-matches them (feed-tooter's orphan grace period holds them back meanwhile)`
+    );
+  }
   console.log(
-    `Story assignment complete: ${newStoriesCreated} new stories created, ${articles.length - newStoriesCreated} matched to existing`
+    `Story assignment complete: ${newStoriesCreated} new stories created, ${articles.length - newStoriesCreated - leftUnassigned} matched to existing`
   );
 }
 
