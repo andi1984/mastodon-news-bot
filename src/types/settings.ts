@@ -39,6 +39,14 @@ export type SemanticSimilaritySettings = {
   max_pairs_per_batch?: number;
 };
 
+export type AdaptiveTootingSettings = {
+  normal_batch_size?: number;
+  breaking_batch_size?: number;
+  min_minutes_between_toots?: number;
+  cooldown_hours?: number;
+  pin_duration_hours?: number;
+};
+
 export type Settings = {
   username: string;
   hashtags: string[];
@@ -47,8 +55,22 @@ export type Settings = {
   feed_hashtags: string[];
   feed_specific_hashtags?: Record<string, string[]>;
   feed_priorities: Record<string, number>;
-  toot_batch_size: number;
+  toot_batch_size?: number;
   min_freshness_hours: number;
+  /**
+   * Per-job kill switches, keyed by job name (day/night variants share the
+   * "feed-grabber" key). false drops the job from the Bree schedule entirely
+   * — no worker threads are spawned for it. Missing keys default to enabled.
+   */
+  jobs_enabled?: Record<string, boolean>;
+  adaptive_tooting?: AdaptiveTootingSettings;
+  story_threading_enabled?: boolean;
+  poll_enabled?: boolean;
+  poll_chance?: number;
+  story_retention_days?: number;
+  untooted_story_retention_days?: number;
+  ai_usage_retention_days?: number;
+  tooted_hash_retention_days?: number;
   cw_mapping: SingleCWMapping[];
   similarity_threshold?: number;
   story_similarity_threshold?: number;

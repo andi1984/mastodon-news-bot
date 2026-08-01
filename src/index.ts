@@ -32,6 +32,24 @@ const jobsRoot = path.join(__dirname, "jobs");
  */
 const ext = __dirname.includes("/src") ? "ts" : "js";
 
+/**
+ * Per-job kill switches: settings.jobs_enabled maps a job key to false to
+ * drop it from the schedule entirely (no worker spawns at all — worker churn
+ * is this bot's main memory pressure). Missing keys default to enabled.
+ * The day/night grabber variants share the "feed-grabber" key.
+ */
+const jobsEnabled: Record<string, boolean> =
+  (settings as any).jobs_enabled ?? {};
+const jobKey = (name: string) => name.replace(/-(day|night)$/, "");
+const filterEnabledJobs = <T extends { name: string }>(jobs: T[]): T[] =>
+  jobs.filter((job) => {
+    if (jobsEnabled[jobKey(job.name)] === false) {
+      console.log(`[jobs] ${job.name} disabled via settings.jobs_enabled`);
+      return false;
+    }
+    return true;
+  });
+
 const bree = new Bree({
   root: jobsRoot,
   defaultExtension: ext,
@@ -45,7 +63,7 @@ const bree = new Bree({
       maxYoungGenerationSizeMb: 128,
     },
   },
-  jobs: [
+  jobs: filterEnabledJobs([
     // Feed grabber runs frequently to catch breaking news
     // Day (06:00-21:59): every 15 minutes
     {
@@ -104,7 +122,7 @@ const bree = new Bree({
       path: path.join(jobsRoot, `story-thread-fixer.${ext}`),
       cron: "0 3,15 * * *",
     },
-  ],
+  ]),
 });
 
 bree.start();
