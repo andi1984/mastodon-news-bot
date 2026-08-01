@@ -85,7 +85,9 @@ Schema lives in `migrations/` (numbered SQL files, applied manually to Supabase)
 - On HTTP 429: wait 30 minutes before retrying
 
 ### Bree Worker Contract
-- Every job MUST end with `parentPort.postMessage("done")` (or `process.exit(0)` when run standalone) on **every** exit path, including early returns — Bree only terminates the worker on that message.
+- Every job MUST end with `await postDone()` from `src/helper/workerLifecycle.ts` (never a raw `parentPort.postMessage("done")`) on **every** exit path, including early returns and catch handlers — Bree only terminates the worker on that message, and `postDone` flushes stdout/stderr first so job logs survive the terminate (raw postMessage loses ~99.9% of them).
+- Every job arms `startWatchdog("<job-name>")` as its first statement — a 240s soft deadline that logs a loud, flushed warning naming the job if it overruns (it does NOT post done; Bree's 300s `closeWorkerAfterMs` remains the only kill switch).
+- New jobs must be listed in `jobs_enabled` in `settings.json` (per-job kill switch, checked in `src/index.ts` before scheduling).
 - Every network await and retry/backoff budget inside a worker must be bounded **well below 300s** (the `closeWorkerAfterMs` kill window) — see the per-dependency timeout table in `docs/operations.md`. Never `sleep()` out a rate limit inside a worker; stop the run cleanly and let the next scheduled run resume.
 - Safety net: `closeWorkerAfterMs: 300_000` in `src/index.ts` kills any worker after 5 min; worker heaps are capped via `resourceLimits`.
 - Workers are threads of the main process — their memory counts toward one RSS. Think twice before adding new high-frequency jobs; worker churn is the bot's main memory pressure (see `docs/operations.md`).

@@ -12,7 +12,7 @@
  */
 
 import "dotenv/config";
-import { parentPort } from "node:worker_threads";
+import { postDone, startWatchdog } from "../helper/workerLifecycle.js";
 import process from "node:process";
 import getInstance from "../helper/login.js";
 import { normalizeTootContent } from "../helper/contentNormalizer.js";
@@ -239,6 +239,7 @@ async function findAndCleanDuplicates(): Promise<{
 }
 
 (async () => {
+  startWatchdog("cleanup-duplicates");
   console.log("[cleanup-duplicates] Starting duplicate toot cleanup...");
 
   try {
@@ -251,12 +252,10 @@ async function findAndCleanDuplicates(): Promise<{
     console.log(`  Skipped (has interactions): ${stats.skipped}`);
     console.log(`  Failed: ${stats.failed}`);
 
-    if (parentPort) parentPort.postMessage("done");
-    else process.exit(0);
+    await postDone();
   } catch (err) {
     console.error("[cleanup-duplicates] Fatal error:", err);
     // Exit with error code on failure (including rate limit exhaustion)
-    if (parentPort) parentPort.postMessage("done");
-    else process.exit(1);
+    await postDone(1);
   }
 })();

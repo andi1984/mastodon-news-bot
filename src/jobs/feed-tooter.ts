@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { parentPort } from "node:worker_threads";
+import { postDone, startWatchdog } from "../helper/workerLifecycle.js";
 import createClient from "../helper/db.js";
 import getInstance from "../helper/login.js";
 import rssFeedItem2Toot, { FeedItem } from "../helper/rssFeedItem2Toot.js";
@@ -64,7 +64,15 @@ type ArticleRow = {
   data: FeedItem & { _feedKey?: string };
   pub_date: string;
   story_id: string | null;
+  created_at: string;
 };
+
+// An article without a story is usually a budget-clipped feed-grabber run
+// (see storyMatcher budgets) — the next grabber run re-matches it. Posting
+// it standalone immediately risks a duplicate major toot for a topic that
+// already has a story, so fresh orphans wait one grabber cycle (15/30 min)
+// plus margin before the orphan path may pick them up.
+const ORPHAN_GRACE_MS = 35 * 60 * 1000;
 
 type StoryInfo = {
   id: string;
@@ -74,21 +82,21 @@ type StoryInfo = {
 };
 
 (async () => {
+  startWatchdog("feed-tooter");
   const db = createClient();
 
   // 0. Check if we're in cooldown (after breaking news)
   const cooldownStatus = await isInCooldown();
   if (cooldownStatus.inCooldown) {
     console.log(`Skipping: in cooldown (reason: ${cooldownStatus.reason})`);
-    if (parentPort) parentPort.postMessage("done");
-    else process.exit(0);
+    await postDone();
     return;
   }
 
   // 1. Fetch untooted articles with story_id
   let untootedQuery = db
     .from(settings.db_table)
-    .select("id,data,pub_date,story_id")
+    .select("id,data,pub_date,story_id,created_at")
     .is("tooted", false)
     .order("pub_date", { ascending: false })
     .limit(100);
@@ -119,8 +127,7 @@ type StoryInfo = {
 
   if (!feeds || feeds.length === 0) {
     console.log("ALARM: Kein Feed-Inhalt mehr da zum tooten!");
-    if (parentPort) parentPort.postMessage("done");
-    else process.exit(0);
+    await postDone();
     return;
   }
 
@@ -148,8 +155,14 @@ type StoryInfo = {
   const followUpGroups = new Map<string, ArticleRow[]>(); // story_id -> articles for threading
   const orphanArticles: ArticleRow[] = [];
 
+  let orphansInGrace = 0;
   for (const article of feeds) {
     if (!article.story_id) {
+      const ageMs = Date.now() - new Date(article.created_at).getTime();
+      if (Number.isFinite(ageMs) && ageMs < ORPHAN_GRACE_MS) {
+        orphansInGrace++;
+        continue; // leave untouched; grabber re-matches or next run posts it
+      }
       orphanArticles.push(article);
       continue;
     }
@@ -177,7 +190,8 @@ type StoryInfo = {
   }
 
   console.log(
-    `Articles: ${newStoryArticles.length} new, ${followUpGroups.size} follow-up threads, ${orphanArticles.length} orphans`
+    `Articles: ${newStoryArticles.length} new, ${followUpGroups.size} follow-up threads, ${orphanArticles.length} orphans` +
+      (orphansInGrace > 0 ? ` (${orphansInGrace} in re-match grace period)` : "")
   );
 
   // 4. Group new story articles by story_id
@@ -665,11 +679,9 @@ type StoryInfo = {
     console.log("No stories or threads to post.");
   }
 
-  if (parentPort) parentPort.postMessage("done");
-  else process.exit(0);
-})().catch((err) => {
+  await postDone();
+})().catch(async (err) => {
   // Bree worker contract: "done" must be posted on every exit path.
   console.error("[feed-tooter] Fatal error:", err);
-  if (parentPort) parentPort.postMessage("done");
-  else process.exit(1);
+  await postDone(1);
 });

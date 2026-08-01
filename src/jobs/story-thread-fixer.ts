@@ -12,7 +12,7 @@
  */
 
 import "dotenv/config";
-import { parentPort } from "node:worker_threads";
+import { postDone, startWatchdog } from "../helper/workerLifecycle.js";
 import process from "node:process";
 import getInstance from "../helper/login.js";
 import {
@@ -249,6 +249,7 @@ async function fixCluster(
 }
 
 (async () => {
+  startWatchdog("story-thread-fixer");
   console.log("[story-thread-fixer] Starting story thread fixer job...");
   console.log(`  Similarity threshold: ${SIMILARITY_THRESHOLD}`);
   console.log(`  Time window: ${TIME_WINDOW_HOURS} hours`);
@@ -262,8 +263,7 @@ async function fixCluster(
 
     if (toots.length === 0) {
       console.log("[story-thread-fixer] No toots to analyze");
-      if (parentPort) parentPort.postMessage("done");
-      else process.exit(0);
+      await postDone();
       return;
     }
 
@@ -274,8 +274,7 @@ async function fixCluster(
       console.log(
         "[story-thread-fixer] No similar toot clusters found - all good!"
       );
-      if (parentPort) parentPort.postMessage("done");
-      else process.exit(0);
+      await postDone();
       return;
     }
 
@@ -338,11 +337,9 @@ async function fixCluster(
       );
     }
 
-    if (parentPort) parentPort.postMessage("done");
-    else process.exit(0);
+    await postDone();
   } catch (err) {
     console.error("[story-thread-fixer] Fatal error:", err);
-    if (parentPort) parentPort.postMessage("done");
-    else process.exit(1);
+    await postDone(1);
   }
 })();
