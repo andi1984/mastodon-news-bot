@@ -5,7 +5,7 @@
   "type": "module",
   "main": "src/index.ts",
   "engines": {
-    "node": ">=24.0.0"
+    "node": ">=24.0.0 <24.16.0"
   },
   "scripts": {
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",

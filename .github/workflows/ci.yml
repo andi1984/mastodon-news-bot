@@ -21,10 +21,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Use Node.js 20
+      - name: Use Node.js 24
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24.15.0
           cache: 'npm'
 
       - name: Install dependencies
@@ -38,7 +38,7 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [20, 22]
+        node-version: [22, '24.15.0']
 
     steps:
       - uses: actions/checkout@v4
@@ -62,7 +62,7 @@ jobs:
           JEST_JUNIT_OUTPUT_NAME: junit.xml
 
       - name: Upload test results
-        if: always() && matrix.node-version == 20
+        if: always() && matrix.node-version == '24.15.0'
         uses: actions/upload-artifact@v4
         with:
           name: test-results
@@ -70,7 +70,7 @@ jobs:
           retention-days: 30
 
       - name: Upload coverage report
-        if: always() && matrix.node-version == 20
+        if: always() && matrix.node-version == '24.15.0'
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
@@ -78,7 +78,7 @@ jobs:
           retention-days: 30
 
       - name: Test report
-        if: always() && matrix.node-version == 20
+        if: always() && matrix.node-version == '24.15.0'
         uses: dorny/test-reporter@v1
         with:
           name: Test Results
@@ -87,7 +87,7 @@ jobs:
           fail-on-error: true
 
       - name: Coverage report
-        if: always() && matrix.node-version == 20 && github.event_name == 'pull_request'
+        if: always() && matrix.node-version == '24.15.0' && github.event_name == 'pull_request'
         uses: davelosert/vitest-coverage-report-action@v2
         with:
           json-summary-path: coverage/coverage-summary.json
@@ -95,7 +95,7 @@ jobs:
           name: Coverage Report
 
       - name: Coverage summary on push
-        if: always() && matrix.node-version == 20 && github.event_name == 'push'
+        if: always() && matrix.node-version == '24.15.0' && github.event_name == 'push'
         run: |
           echo "## Test Coverage" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -117,10 +117,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Use Node.js 20
+      - name: Use Node.js 24
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24.15.0
           cache: 'npm'
 
       - name: Install dependencies
