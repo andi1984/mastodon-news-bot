@@ -13,6 +13,98 @@ The bot is a single long-running Node process. Bree schedules every job as a
 short-lived **worker thread** inside that process (see `src/index.ts`), so all
 job memory and CPU show up under one PID.
 
+## The linear memory growth: what it actually is (August 2026)
+
+Read this before touching anything below it. Three earlier investigations
+blamed worker churn, hung workers, and unbounded awaits. Production telemetry
+and a controlled reproduction rule out all three.
+
+### The measurement
+
+Hourly `[memory]` lines from two consecutive production deployments:
+
+| Window                        | Growth      | heapUsed | workersAlive |
+| ----------------------------- | ----------- | -------- | ------------ |
+| Jul 29 20:12 → Aug 1 08:12    | 11.75 MB/h  | 19–17 MB | 0 at every sample |
+| Aug 4 20:07 → Aug 5 18:07     | 13.4 MB/h   | 12–15 MB | 0 at every sample |
+
+The slope is **identical before and after every hardening PR** (#54, #59,
+#60). None of them changed it by a measurable amount. At 2.2 GB RSS the main
+isolate's JS heap was still 16 MB, `external` still 4 MB, and cgroup `file`
+(page cache) flat — so the growth is **native anonymous memory, invisible to
+V8**. A heap dump will never show it.
+
+### It scales with worker *spawns*, not time or workload
+
+`feed-grabber` is the only job whose cadence differs day (4/h) vs night (2/h);
+everything else runs at a fixed cadence. Solving the two observed rates:
+
+```
+day:   C + 4g = 11.8 MB/h        ->  g = 0.6 MB per feed-grabber run
+night: C + 2g = 10.6 MB/h        ->  C = 9.4 MB/h over 12.94 runs/h = 0.73 MB/run
+```
+
+Counting `Worker for job ... online` lines gives 17.3 spawns/h during the day,
+against 11.3 MB/h measured over the same window: **~670 KB per spawn**. The
+figure is the same for every job — including `alive`, whose entire body is
+`console.log("Alive")`. The leak is therefore a property of *spawning a worker
+thread*, not of anything a job does.
+
+At ~415 spawns/day that is ~280 MB/day, which is the whole symptom.
+
+### It does not reproduce on official Node builds
+
+A harness replicating Bree's exact lifecycle (`resourceLimits`,
+`removeAllListeners('message'|'exit')`, `terminate()` on `"done"`, the
+`postDone` flush+150 ms drain) was run against the real dependency graph:
+
+| Configuration (≈200 spawns each unless noted)        | Leak per spawn |
+| ---------------------------------------------------- | -------------- |
+| bare dependency-graph import                          | 5 KB           |
+| + realistic allocation, 60 log lines/run              | 14 KB          |
+| + 20 real TLS connections + body reads + XML parse    | 5 KB           |
+| + 20 real DNS lookups                                 | −31 KB         |
+| 3 workers concurrent                                  | 19 KB          |
+| production `resourceLimits` vs Node defaults          | no difference  |
+| `MALLOC_ARENA_MAX` 32 (default) vs 512                | no difference  |
+| full Bree + the real compiled jobs, ~1500 spawns      | flat (207–227 MB, no drift) |
+
+Same on Node 24.15.0 and 24.10.0 (official builds). Every configuration
+plateaus. To produce the observed 12 MB/h you would need ~670 KB/spawn — the
+official builds are off by a factor of 30–100.
+
+### The runtime is not the version this repo pins
+
+**Nixpacks resolves the Node version by MAJOR version only.** It installs the
+nixpkgs `nodejs_24` derivation from a fixed nixpkgs revision, and ignores the
+patch version in `.nvmrc`. The running container was confirmed to hold
+`/nix/store/p2sk3402d788hqn5diy5gba8cskjffzz-nodejs-24.10.0`.
+
+So the 24.15.0 pin added in `ac42467` never took effect in production, and CI
+has been testing a runtime that never ships. The only variable that separates
+the leaking production process from the flat reproduction is the **Node build
+itself** (nixpkgs-patched vs official).
+
+That is why the service now builds from a `Dockerfile` pinned to
+`node:24.15.0-bookworm-slim`, with `railway.json` forcing the Dockerfile
+builder. `.nvmrc` is kept for local development and CI only — **it does not
+control production.**
+
+### How to verify
+
+The `[memory]` line now carries `version=`, `spawns=`, `threads=`,
+`heapTotal=` and `hwm=`, and is emitted every 10 minutes. Two checks:
+
+1. `version=` must read `v24.15.0`. If it doesn't, the build is still going
+   through Nixpacks and the pin is still inert.
+2. Take two lines an hour apart: `Δrss / Δspawns` is the per-spawn leak. It
+   was ~670 KB. Under ~50 KB means it is fixed; still ~600 KB means the Node
+   build was not the cause and the next suspect is the Railway runtime itself
+   (raise it with Railway support, with these numbers).
+
+If `threads=` climbs, worker threads are not exiting — that *would* be a real
+app bug, and none of the data so far shows it.
+
 ## Node version: why ≥24
 
 The bot spawns roughly 400 worker threads per day (feed-grabber ~80,
@@ -58,7 +150,10 @@ memory fix in that window — whatever made 24.16 measure ~0 was already in
 the Node worker-churn leak; look at hung workers and in-worker workloads
 (next section).
 
-### Why `.nvmrc` pins exactly 24.15.0
+### Why the runtime pins exactly 24.15.0
+
+> **Note:** the pin lives in `Dockerfile`, not `.nvmrc` — see the section at
+> the top of this document for why `.nvmrc` is inert on Railway.
 
 v24.16.0 introduced a fetch memory-leak regression (nodejs/node#63708 /
 #63574): buffers pinned in V8 eternal handles after `AbortSignal.timeout`
