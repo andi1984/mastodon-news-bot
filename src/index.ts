@@ -12,7 +12,7 @@ const settings = require("./data/settings.json");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 console.log(
-  `Starting Mastodon News Bot v2.0 (min freshness: ${settings.min_freshness_hours}h)`
+  `Starting Mastodon News Bot v2.0 (min freshness: ${settings.min_freshness_hours}h)`,
 );
 
 // Verify Supabase connection on startup
@@ -20,7 +20,9 @@ checkHealth().then((healthy) => {
   if (healthy) {
     console.log("Supabase connection: OK");
   } else {
-    console.error("WARNING: Supabase connection failed - check SUPABASE_URL/KEY");
+    console.error(
+      "WARNING: Supabase connection failed - check SUPABASE_URL/KEY",
+    );
   }
 });
 
@@ -125,22 +127,52 @@ const bree = new Bree({
   ]),
 });
 
+/**
+ * Worker spawns since boot. The growth this process has shown in production is
+ * proportional to *spawns*, not to wall-clock time or to what a job does, so
+ * the spawn counter is what turns the memory line into a measurement:
+ * `Δrss / Δspawns` is the per-spawn leak, readable straight from the logs.
+ */
+let workerSpawns = 0;
+bree.on("worker created", () => {
+  workerSpawns++;
+});
+
 bree.start();
 
 /**
- * Hourly memory telemetry. Railway's memory graph counts the whole container
- * cgroup (including filesystem cache), so a climbing graph alone can't tell a
- * process leak from cache growth. Logging both views side by side does:
- * - rss/heapUsed climbing  -> real leak in this process
+ * Memory telemetry, every 10 minutes.
+ *
+ * Railway's memory graph counts the whole container cgroup (including
+ * filesystem cache), so a climbing graph alone can't tell a process leak from
+ * cache growth. Logging every view side by side can:
+ * - rss/anon climbing, heap flat -> native leak (not V8 — heap dumps won't show it)
+ * - heapUsed/heapTotal climbing   -> ordinary JS retention
  * - rss flat, cgroup "file" climbing -> page cache, not a leak
+ * - threads climbing              -> worker threads that never actually exit
+ * - rss climbing with spawns flat -> time-based, so not worker churn
+ *
+ * `version` is logged because it is NOT implied by the repo: Nixpacks resolves
+ * `.nvmrc` by major version only, so the runtime can differ from the pin (see
+ * docs/operations.md).
  */
 function logMemoryStats() {
   const mb = (bytes: number) => Math.round(bytes / 1024 / 1024);
   const m = process.memoryUsage();
+
+  const procField = (file: string, key: string) => {
+    try {
+      const src = readFileSync(file, "utf8");
+      return Number(new RegExp(`^${key}:\\s+(\\d+)`, "m").exec(src)?.[1] ?? 0);
+    } catch {
+      return 0; // /proc unavailable (local dev, macOS)
+    }
+  };
+
   let cgroup = "";
   try {
     const current = Number(
-      readFileSync("/sys/fs/cgroup/memory.current", "utf8").trim()
+      readFileSync("/sys/fs/cgroup/memory.current", "utf8").trim(),
     );
     const stat = readFileSync("/sys/fs/cgroup/memory.stat", "utf8");
     const field = (key: string) =>
@@ -151,11 +183,16 @@ function logMemoryStats() {
   } catch {
     // cgroup v2 files unavailable (local dev, macOS, cgroup v1)
   }
+
   console.log(
-    `[memory] rss=${mb(m.rss)}MB heapUsed=${mb(m.heapUsed)}MB` +
-      ` external=${mb(m.external)}MB workersAlive=${bree.workers.size}${cgroup}`
+    `[memory] version=${process.version} rss=${mb(m.rss)}MB` +
+      ` hwm=${Math.round(procField("/proc/self/status", "VmHWM") / 1024)}MB` +
+      ` heapUsed=${mb(m.heapUsed)}MB heapTotal=${mb(m.heapTotal)}MB` +
+      ` external=${mb(m.external)}MB arrayBuffers=${mb(m.arrayBuffers)}MB` +
+      ` threads=${procField("/proc/self/status", "Threads")}` +
+      ` spawns=${workerSpawns} workersAlive=${bree.workers.size}${cgroup}`,
   );
 }
 
 logMemoryStats();
-setInterval(logMemoryStats, 60 * 60 * 1000);
+setInterval(logMemoryStats, 10 * 60 * 1000);
